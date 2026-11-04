@@ -1,0 +1,29 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "BetterSmartIR ya está agregada. Administra tus climas desde su panel en la barra lateral."
+    },
+    "step": {
+      "user": {
+        "description": "Esto activa el panel de BetterSmartIR en la barra lateral. Allí agregas y pruebas tus aires acondicionados."
+      }
+    }
+  },
+  "exceptions": {
+    "combination_not_available": {
+      "message": "El código no admite esa combinación de modo, ventilador y temperatura."
+    },
+    "emitter_not_found": {
+      "message": "El emisor IR ya no existe."
+    },
+    "emitter_off": {
+      "message": "La entidad del emisor IR está apagada. Enciéndela para enviar comandos."
+    },
+    "emitter_unavailable": {
+      "message": "El emisor IR no está disponible."
+    },
+    "send_failed": {
+      "message": "El emisor IR no pudo enviar el comando."
+    }
+  }
+}

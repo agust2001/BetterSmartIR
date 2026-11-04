@@ -1,0 +1,15 @@
+{
+  "domain": "better_smartir",
+  "name": "BetterSmartIR",
+  "after_dependencies": ["broadlink"],
+  "codeowners": ["@agust2001"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "remote", "websocket_api"],
+  "documentation": "https://github.com/agust2001/BetterSmartIR",
+  "integration_type": "hub",
+  "iot_class": "assumed_state",
+  "issue_tracker": "https://github.com/agust2001/BetterSmartIR/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

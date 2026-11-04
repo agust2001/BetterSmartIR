@@ -1,0 +1,29 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "BetterSmartIR is already added. Manage your climates from its panel in the sidebar."
+    },
+    "step": {
+      "user": {
+        "description": "This activates the BetterSmartIR panel in the sidebar. You add and test your air conditioners there."
+      }
+    }
+  },
+  "exceptions": {
+    "combination_not_available": {
+      "message": "The code does not support that combination of mode, fan and temperature."
+    },
+    "emitter_not_found": {
+      "message": "The IR emitter no longer exists."
+    },
+    "emitter_off": {
+      "message": "The IR emitter entity is turned off. Turn it on to send commands."
+    },
+    "emitter_unavailable": {
+      "message": "The IR emitter is not available."
+    },
+    "send_failed": {
+      "message": "The IR emitter could not send the command."
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+ "repository": "https://github.com/smartHomeHub/SmartIR",
+ "commit": "e4df2957ad915536f41ffb39daa96886d7cfe040",
+ "license": "MIT",
+ "controller": "Broadlink",
+ "code_count": 333,
+ "repaired": [
+  2680
+ ]
+}

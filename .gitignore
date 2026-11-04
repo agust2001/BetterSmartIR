@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Node
+node_modules/
+
+# Claude Code
+.claude/settings.local.json
+
+# Varios
+*.log
+*.tmp
+.env*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
