@@ -2,101 +2,13 @@
 // external libraries, so it also works without internet.
 
 import { translator } from "./i18n.js";
+import { DEFAULT_MODE_ICON, MODE_ICONS, icon } from "./icons.js";
 import * as session from "./session.js";
+import { STYLES } from "./styles.js";
 
 const API_PREFIX = "better_smartir";
 // The entity appears after the reload that follows saving a climate.
 const REFRESH_AFTER_SAVE_MS = 1500;
-
-const STYLES = `
-  :host {
-    display: block;
-    min-height: 100%;
-    background: var(--primary-background-color);
-    color: var(--primary-text-color);
-    font-family: var(--ha-font-family-body, Roboto, sans-serif);
-  }
-  header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 56px;
-    padding: 0 16px;
-    background: var(--app-header-background-color, var(--primary-color));
-    color: var(--app-header-text-color, #fff);
-    font-size: 20px;
-  }
-  header button {
-    background: none;
-    border: 0;
-    color: inherit;
-    font-size: 22px;
-    padding: 4px 8px;
-    min-height: 0;
-  }
-  main {
-    max-width: 560px;
-    margin: 0 auto;
-    padding: 16px;
-    display: grid;
-    gap: 16px;
-  }
-  section {
-    display: grid;
-    gap: 12px;
-    padding: 16px;
-    border-radius: 12px;
-    background: var(--card-background-color);
-    border: 1px solid var(--divider-color);
-  }
-  h2 { margin: 0; font-size: 18px; font-weight: 500; }
-  h3 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--secondary-text-color);
-  }
-  p { margin: 0; }
-  .muted { color: var(--secondary-text-color); font-size: 14px; }
-  .error { color: var(--error-color); }
-  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .spread { justify-content: space-between; }
-  .temperature { font-size: 28px; min-width: 88px; text-align: center; }
-  label { display: grid; gap: 6px; font-size: 14px; }
-  select, input {
-    font: inherit;
-    padding: 10px;
-    border-radius: 8px;
-    color: var(--primary-text-color);
-    background: var(--card-background-color);
-    border: 1px solid var(--divider-color);
-  }
-  button {
-    font: inherit;
-    min-height: 40px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--divider-color);
-    background: var(--card-background-color);
-    color: var(--primary-text-color);
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) { border-color: var(--primary-color); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.selected, button.primary {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
-    color: var(--text-primary-color, #fff);
-  }
-  ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-  li {
-    display: grid;
-    gap: 8px;
-    padding: 12px;
-    border-radius: 8px;
-    border: 1px solid var(--divider-color);
-  }
-`;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(
@@ -110,6 +22,18 @@ class BetterSmartIRPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    // The live region stays in place: screen readers ignore one that is redrawn.
+    this.shadowRoot.innerHTML = `
+      <style>${STYLES}</style>
+      <div id="content"></div>
+      <div id="live" class="visually-hidden" role="status"></div>
+    `;
+    this._content = this.shadowRoot.getElementById("content");
+    this._live = this.shadowRoot.getElementById("live");
+    this._focusKey = null;
+    this._focusVisible = false;
+    this._focusPending = false;
+    this._sendKey = null;
     this._view = "list";
     this._climates = [];
     this._emitters = [];
@@ -247,12 +171,15 @@ class BetterSmartIRPanel extends HTMLElement {
     }
     const request = session.sendRequest(this._session, category);
     this._session = session.sendStarted(this._session, category);
+    this._live.textContent = this._t("sending");
     this._render();
     try {
       await this._call("test/send", request);
       this._session = session.sendSucceeded(this._session);
+      this._live.textContent = this._t("sent");
     } catch (error) {
       this._session = session.sendFailed(this._session, this._errorText(error));
+      this._live.textContent = "";
     }
     this._render();
   }
@@ -314,7 +241,8 @@ class BetterSmartIRPanel extends HTMLElement {
     if (!button || button.disabled) {
       return;
     }
-    const { action, category, climate, value } = button.dataset;
+    const { action, category, climate, focusKey, value } = button.dataset;
+    this._sendKey = focusKey;
     switch (action) {
       case "menu":
         this.dispatchEvent(
@@ -403,7 +331,7 @@ class BetterSmartIRPanel extends HTMLElement {
   }
 
   _render() {
-    const focused = this.shadowRoot.activeElement?.dataset?.focusKey;
+    this._rememberFocus();
     const views = {
       list: () => this._renderList(),
       edit: () => this._renderEdit(),
@@ -413,28 +341,78 @@ class BetterSmartIRPanel extends HTMLElement {
       save: () => this._renderSave(),
     };
     const error = this._error
-      ? `<p class="error" role="alert">${escapeHtml(this._error)}</p>`
+      ? `<section class="status-failed" role="alert">
+           <div class="status-line">${icon("alertCircle")}<span>${escapeHtml(this._error)}</span></div>
+         </section>`
       : "";
     const menu = this._narrow
-      ? `<button data-action="menu" aria-label="Menu">☰</button>`
+      ? `<button data-action="menu" aria-label="Menu">${icon("menu")}</button>`
       : "";
-    this.shadowRoot.innerHTML = `
-      <style>${STYLES}</style>
+    this._content.innerHTML = `
       <header>${menu}<span>BetterSmartIR</span></header>
-      <main>${error}${views[this._view]()}</main>
+      <main class="${this._view === "test" ? "wide" : ""}">${error}${views[this._view]()}</main>
     `;
-    if (focused) {
-      this.shadowRoot.querySelector(`[data-focus-key="${focused}"]`)?.focus();
+    this._restoreFocus();
+  }
+
+  _rememberFocus() {
+    const active = this.shadowRoot.activeElement;
+    if (active?.dataset?.focusKey) {
+      this._focusKey = active.dataset.focusKey;
+      this._focusVisible = active.matches(":focus-visible");
+    } else if (!this._focusPending) {
+      this._focusKey = null;
     }
   }
 
-  _button(label, attributes, { selected = false, primary = false, disabled = false } = {}) {
+  // A button disabled while sending gets the focus back when the send ends. A
+  // control that no longer exists hands it to the main action, but only for people
+  // using the keyboard: moving it would make the page jump for everyone else.
+  _restoreFocus() {
+    this._focusPending = false;
+    if (!this._focusKey) {
+      return;
+    }
+    const target = this._content.querySelector(
+      `[data-focus-key="${CSS.escape(this._focusKey)}"]`,
+    );
+    if (target && !target.disabled) {
+      target.focus({ preventScroll: true });
+    } else if (this._session?.sendStatus === "sending") {
+      this._focusPending = true;
+    } else if (this._focusVisible) {
+      const main = this._content.querySelector("button.primary:not(:disabled)");
+      (main ?? this._content.querySelector("input, select"))?.focus();
+    }
+  }
+
+  // variant: "primary", "danger", "option" or "round". An option also tells whether
+  // it is selected. A button without visible text needs a name.
+  _button(
+    label,
+    attributes,
+    { variant = "", modeClass = "", iconName, name, selected, disabled = false } = {},
+  ) {
     const data = Object.entries(attributes)
       .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
       .join(" ");
     const focusKey = Object.values(attributes).join(":");
-    const classes = selected || primary ? `class="${selected ? "selected" : "primary"}"` : "";
-    return `<button ${classes} ${data} data-focus-key="${escapeHtml(focusKey)}" ${disabled ? "disabled" : ""}>${escapeHtml(label)}</button>`;
+    const sending = this._session?.sendStatus === "sending" && focusKey === this._sendKey;
+    const pressed = selected === undefined ? "" : `aria-pressed="${selected}"`;
+    const accessibleName = name ? `aria-label="${escapeHtml(name)}"` : "";
+    return `
+      <button class="${variant} ${modeClass} ${sending ? "sending" : ""}" ${data} data-focus-key="${escapeHtml(focusKey)}"
+        ${pressed} ${accessibleName} ${disabled ? "disabled" : ""}>
+        ${sending ? icon("loading") : iconName ? icon(iconName) : ""}${escapeHtml(label)}${selected ? icon("check") : ""}
+      </button>`;
+  }
+
+  _modeClass(mode) {
+    return `mode-${MODE_ICONS[mode] ? mode : "other"}`;
+  }
+
+  _modeIcon(mode) {
+    return MODE_ICONS[mode] ?? DEFAULT_MODE_ICON;
   }
 
   _renderList() {
@@ -443,22 +421,32 @@ class BetterSmartIRPanel extends HTMLElement {
       .map(
         (climate) => `
           <li>
-            <strong>${escapeHtml(climate.name)}</strong>
-            <p class="muted">
-              ${escapeHtml(climate.manufacturer)} · ${escapeHtml(t("code_label", { code: climate.code }))}
-              · ${escapeHtml(climate.entity_id ?? "…")}
-            </p>
+            <div class="climate">
+              <span class="badge">${icon("airConditioner")}</span>
+              <div>
+                <strong>${escapeHtml(climate.name)}</strong>
+                <p class="muted">
+                  ${escapeHtml(climate.manufacturer)} · ${escapeHtml(t("code_label", { code: climate.code }))}
+                  · ${escapeHtml(climate.entity_id ?? "…")}
+                </p>
+              </div>
+            </div>
             <div class="row">
-              ${this._button(t("edit"), { action: "edit", climate: climate.climate_id })}
-              ${this._button(t("delete"), { action: "ask-delete", climate: climate.climate_id })}
+              ${this._button(t("edit"), { action: "edit", climate: climate.climate_id }, { iconName: "pencil" })}
+              ${this._button(t("delete"), { action: "ask-delete", climate: climate.climate_id }, { iconName: "trash" })}
             </div>
           </li>`,
       )
       .join("");
+    const empty = `
+      <div class="empty">
+        <span class="badge">${icon("airConditioner")}</span>
+        <p class="muted">${escapeHtml(t("no_climates"))}</p>
+      </div>`;
     return `
       <section>
-        ${items ? `<ul>${items}</ul>` : `<p class="muted">${escapeHtml(t("no_climates"))}</p>`}
-        <div>${this._button(t("add_climate"), { action: "add" }, { primary: true })}</div>
+        ${items ? `<ul>${items}</ul>` : empty}
+        <div>${this._button(t("add_climate"), { action: "add" }, { variant: "primary", iconName: "plus" })}</div>
       </section>`;
   }
 
@@ -498,7 +486,7 @@ class BetterSmartIRPanel extends HTMLElement {
       [{ value: "", label: t("no_sensor") }, ...sensors],
       this._sensors[key],
     );
-    return `<label>${escapeHtml(t(key))}<select name="${key}">${options}</select></label>`;
+    return `<label>${escapeHtml(t(key))}<select name="${key}" data-focus-key="${key}">${options}</select></label>`;
   }
 
   _renderEdit() {
@@ -510,18 +498,20 @@ class BetterSmartIRPanel extends HTMLElement {
         <label>${escapeHtml(t("climate_name"))}
           <input name="name" value="${escapeHtml(this._name)}" data-focus-key="name" autocomplete="off">
         </label>
-        <label>${escapeHtml(t("emitter"))}<select name="emitter">${this._emitterOptions()}</select></label>
+        <label>${escapeHtml(t("emitter"))}<select name="emitter" data-focus-key="emitter">${this._emitterOptions()}</select></label>
         ${this._renderSensor("temperature_sensor", "temperature")}
         ${this._renderSensor("humidity_sensor", "humidity")}
+      </section>
+      <section>
         <p class="muted">
           ${escapeHtml(manufacturer)} · ${escapeHtml(t("code_label", { code }))}
         </p>
-        <div>${this._button(t("test_code"), { action: "change-code" }, { disabled: !this._emitters.length })}</div>
-        <div class="row">
-          ${this._button(t("confirm_save"), { action: "save" }, { primary: true, disabled: !this._name.trim() })}
-          ${this._button(t("cancel"), { action: "cancel" })}
-        </div>
-      </section>`;
+        <div>${this._button(t("test_code"), { action: "change-code" }, { iconName: "play", disabled: !this._emitters.length })}</div>
+      </section>
+      <div class="row spread">
+        ${this._button(t("confirm_save"), { action: "save" }, { variant: "primary", iconName: "contentSave", disabled: !this._name.trim() })}
+        ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
+      </div>`;
   }
 
   _renderDelete() {
@@ -531,20 +521,23 @@ class BetterSmartIRPanel extends HTMLElement {
       <section>
         <h2>${escapeHtml(t("delete_question", { name }))}</h2>
         <p>${escapeHtml(t("delete_warning", { entity }))}</p>
-        <div class="row">
-          ${this._button(t("delete"), { action: "delete" }, { primary: true })}
-          ${this._button(t("cancel"), { action: "cancel" })}
+        <div class="row spread">
+          ${this._button(t("delete"), { action: "delete" }, { variant: "danger", iconName: "trash" })}
+          ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
         </div>
       </section>`;
   }
 
   _renderSelect() {
     const t = this._t;
-    const cancel = this._button(t("cancel"), { action: "cancel" });
+    const cancel = this._button(t("cancel"), { action: "cancel" }, { iconName: "close" });
     if (!this._emitters.length) {
       return `
         <section>
-          <p>${escapeHtml(t("no_emitters"))}</p>
+          <div class="empty">
+            <span class="badge">${icon("alertCircle")}</span>
+            <p>${escapeHtml(t("no_emitters"))}</p>
+          </div>
           <div>${cancel}</div>
         </section>`;
     }
@@ -557,11 +550,11 @@ class BetterSmartIRPanel extends HTMLElement {
     return `
       <section>
         <h2>${escapeHtml(t(this._editing ? "test_code" : "add_climate"))}</h2>
-        <label>${escapeHtml(t("emitter"))}<select name="emitter">${this._emitterOptions()}</select></label>
-        <label>${escapeHtml(t("brand"))}<select name="brand">${brands}</select></label>
+        <label>${escapeHtml(t("emitter"))}<select name="emitter" data-focus-key="emitter">${this._emitterOptions()}</select></label>
+        <label>${escapeHtml(t("brand"))}<select name="brand" data-focus-key="brand">${brands}</select></label>
         <p class="muted">${escapeHtml(t("brand_hint"))}</p>
-        <div class="row">
-          ${this._button(t("start_test"), { action: "start" }, { primary: true })}
+        <div class="row spread">
+          ${this._button(t("start_test"), { action: "start" }, { variant: "primary", iconName: "play" })}
           ${cancel}
         </div>
       </section>`;
@@ -571,52 +564,82 @@ class BetterSmartIRPanel extends HTMLElement {
     const t = this._t;
     return `
       <section>
-        <p>${escapeHtml(t("exhausted"))}</p>
-        <div class="row">
-          ${this._button(t("start_over"), { action: "restart" }, { primary: true })}
-          ${this._button(t("cancel"), { action: "cancel" })}
+        <div class="empty">
+          <span class="badge">${icon("restart")}</span>
+          <p>${escapeHtml(t("exhausted"))}</p>
+        </div>
+        <div class="row spread">
+          ${this._button(t("start_over"), { action: "restart" }, { variant: "primary", iconName: "restart" })}
+          ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
         </div>
       </section>`;
   }
 
-  _renderChoices(title, category, values, selected, labelOf = (value) => value) {
+  _renderChoices(title, category, values, selected, optionsOf) {
     if (!values.length) {
       return "";
     }
     const buttons = values
-      .map((value) =>
-        this._button(
-          labelOf(value),
+      .map((value) => {
+        const { label = value, ...options } = optionsOf?.(value) ?? {};
+        return this._button(
+          label,
           { action: "choose", category, value },
-          { selected: value === selected, disabled: this._isSending() },
-        ),
-      )
+          {
+            variant: "option",
+            selected: value === selected,
+            disabled: this._isSending(),
+            ...options,
+          },
+        );
+      })
       .join("");
-    return `<h3>${escapeHtml(title)}</h3><div class="row">${buttons}</div>`;
+    return `<div class="group"><h3>${escapeHtml(title)}</h3><div class="row">${buttons}</div></div>`;
   }
 
   _isSending() {
     return this._session.sendStatus === "sending";
   }
 
-  _renderStatus() {
+  _renderStatus(primary) {
     const t = this._t;
     const { sendStatus, sendError } = this._session;
-    if (sendStatus === "sending") {
-      return `<p class="muted" role="status">${escapeHtml(t("sending"))}</p>`;
-    }
+    const line = (iconName, text) =>
+      `<div class="status-line">${icon(iconName)}<span>${escapeHtml(text)}</span></div>`;
     if (sendStatus === "failed") {
-      return `<p class="error" role="alert">${escapeHtml(sendError)}</p>`;
+      return `
+        <section class="status status-failed enter" role="alert">
+          ${line("alertCircle", sendError)}
+        </section>`;
     }
     if (sendStatus === "sent") {
       return `
-        <div class="row" role="status">
-          <span>${escapeHtml(t("sent"))}</span>
-          ${this._button(t("yes"), { action: "result", value: "yes" })}
-          ${this._button(t("no"), { action: "result", value: "no" })}
-        </div>`;
+        <section class="status status-sent enter">
+          ${line("checkCircle", t("sent"))}
+          <div class="row">
+            ${this._button(t("yes"), { action: "result", value: "yes" }, { variant: primary === "worked" ? "primary" : "", iconName: "check" })}
+            ${this._button(t("no"), { action: "result", value: "no" }, { iconName: "close" })}
+          </div>
+        </section>`;
     }
-    return "";
+    if (sendStatus === "sending") {
+      return `<section class="status">${line("loading", t("sending"))}</section>`;
+    }
+    return `<section class="status status-idle">${line("airConditioner", t("status_idle"))}</section>`;
+  }
+
+  _renderHero(selection, temperatures, disabled) {
+    const t = this._t;
+    const { mode, temperature } = selection;
+    return `
+      <section class="hero ${this._modeClass(mode)} ${disabled ? "sending" : ""}">
+        <div class="hero-mode">${icon(this._modeIcon(mode))}<span>${escapeHtml(t(`mode_${mode}`))}</span></div>
+        <div class="hero-controls">
+          ${this._button("", { action: "temperature", value: "-1" }, { variant: "round", iconName: "minus", name: t("temperature_down"), disabled: disabled || temperature === temperatures[0] })}
+          <span class="temperature">${escapeHtml(temperature)}°</span>
+          ${this._button("", { action: "temperature", value: "1" }, { variant: "round", iconName: "plus", name: t("temperature_up"), disabled: disabled || temperature === temperatures.at(-1) })}
+        </div>
+      </section>`;
   }
 
   _renderTest() {
@@ -631,29 +654,14 @@ class BetterSmartIRPanel extends HTMLElement {
     const { modes, fans, swings, temperatures } = session.options(current);
     const { details, selection } = current;
     const disabled = this._isSending();
+    const primary = session.primaryAction(current);
+    const variantOf = (action) => (primary === action ? "primary" : "");
     const position = t("code_position", {
       position: current.position + 1,
       total: current.codes.length,
     });
-    const controls = selection
-      ? `
-        <h3>${escapeHtml(t("power"))}</h3>
-        <div class="row">
-          ${this._button(t("turn_on"), { action: "send", category: "on" }, { disabled })}
-          ${this._button(t("turn_off"), { action: "send", category: "off" }, { disabled })}
-        </div>
-        ${this._renderChoices(t("mode"), "mode", modes, selection.mode, (mode) => t(`mode_${mode}`))}
-        <h3>${escapeHtml(t("temperature"))}</h3>
-        <div class="row">
-          ${this._button("−", { action: "temperature", value: "-1" }, { disabled: disabled || selection.temperature === temperatures[0] })}
-          <span class="temperature">${escapeHtml(selection.temperature)}°</span>
-          ${this._button("+", { action: "temperature", value: "1" }, { disabled: disabled || selection.temperature === temperatures.at(-1) })}
-        </div>
-        ${this._renderChoices(t("fan"), "fan", fans, selection.fan)}
-        ${this._renderChoices(t("swing"), "swing", swings, selection.swing)}
-      `
-      : `<p>${escapeHtml(t("no_commands"))}</p>`;
-    return `
+    const progress = ((current.position + 1) / current.codes.length) * 100;
+    const summary = `
       <section>
         <div>
           <h2>${escapeHtml(position)}</h2>
@@ -662,19 +670,45 @@ class BetterSmartIRPanel extends HTMLElement {
             · ${escapeHtml(details.models.join(", "))}
           </p>
         </div>
-        ${controls}
-        ${this._renderStatus()}
-      </section>
-      <section>
-        <div class="row spread">
-          ${this._button(t("previous"), { action: "previous" }, { disabled: disabled || current.position === 0 })}
-          ${this._button(t("next"), { action: "next" }, { disabled })}
-        </div>
-        <div class="row spread">
-          ${this._button(t("save"), { action: "review" }, { primary: true, disabled: disabled || !selection })}
-          ${this._button(t("cancel"), { action: "cancel" })}
-        </div>
+        <div class="progress"><div style="width: ${progress}%"></div></div>
       </section>`;
+    const left = selection
+      ? `${this._renderHero(selection, temperatures, disabled)}${this._renderStatus(primary)}`
+      : `<section><p>${escapeHtml(t("no_commands"))}</p></section>`;
+    const controls = selection
+      ? `
+        <section>
+          <div class="group">
+            <h3>${escapeHtml(t("power"))}</h3>
+            <div class="row">
+              ${this._button(t("turn_on"), { action: "send", category: "on" }, { variant: variantOf("on"), iconName: "power", disabled })}
+              ${this._button(t("turn_off"), { action: "send", category: "off" }, { iconName: "powerOff", disabled })}
+            </div>
+          </div>
+          ${this._renderChoices(t("mode"), "mode", modes, selection.mode, (mode) => ({
+            label: t(`mode_${mode}`),
+            iconName: this._modeIcon(mode),
+            modeClass: this._modeClass(mode),
+          }))}
+          ${this._renderChoices(t("fan"), "fan", fans, selection.fan)}
+          ${this._renderChoices(t("swing"), "swing", swings, selection.swing)}
+        </section>`
+      : "";
+    return `
+      <div class="test-layout">
+        <div class="test-column">${summary}${left}</div>
+        <div class="test-column">${controls}</div>
+        <section class="test-footer">
+          <div class="row spread">
+            ${this._button(t("previous"), { action: "previous" }, { iconName: "chevronLeft", disabled: disabled || current.position === 0 })}
+            ${this._button(t("next"), { action: "next" }, { variant: variantOf("next"), iconName: "chevronRight", disabled })}
+          </div>
+          <div class="row spread">
+            ${this._button(t("save"), { action: "review" }, { variant: variantOf("save"), iconName: "contentSave", disabled: disabled || !selection })}
+            ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
+          </div>
+        </section>
+      </div>`;
   }
 
   _renderSave() {
@@ -684,23 +718,27 @@ class BetterSmartIRPanel extends HTMLElement {
       categories.map((category) => t(`category_${category}`)).join(", ");
     const lines = [];
     if (failed.length) {
-      lines.push(`<p class="error">${escapeHtml(t("summary_failed", { items: items(failed) }))}</p>`);
+      lines.push(
+        `<div class="status-line summary-failed">${icon("alertCircle")}<span>${escapeHtml(t("summary_failed", { items: items(failed) }))}</span></div>`,
+      );
     }
     if (untested.length) {
-      lines.push(`<p>${escapeHtml(t("summary_untested", { items: items(untested) }))}</p>`);
+      lines.push(
+        `<div class="status-line summary-untested">${icon("thermostat")}<span>${escapeHtml(t("summary_untested", { items: items(untested) }))}</span></div>`,
+      );
     }
     const summary = lines.length
-      ? `<h2>${escapeHtml(t("summary_title"))}</h2>${lines.join("")}`
+      ? `<section><h2>${escapeHtml(t("summary_title"))}</h2>${lines.join("")}</section>`
       : "";
     return `
+      ${summary}
       <section>
-        ${summary}
         <label>${escapeHtml(t("climate_name"))}
           <input name="name" value="${escapeHtml(this._name)}" data-focus-key="name" autocomplete="off">
         </label>
-        <div class="row">
-          ${this._button(t("confirm_save"), { action: "save" }, { primary: true, disabled: !this._name.trim() })}
-          ${this._button(t("keep_testing"), { action: "keep-testing" })}
+        <div class="row spread">
+          ${this._button(t("confirm_save"), { action: "save" }, { variant: "primary", iconName: "contentSave", disabled: !this._name.trim() })}
+          ${this._button(t("keep_testing"), { action: "keep-testing" }, { iconName: "chevronLeft" })}
         </div>
       </section>`;
   }

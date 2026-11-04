@@ -9,6 +9,7 @@ import {
   options,
   pendingSummary,
   previous,
+  primaryAction,
   restart,
   saveRequest,
   select,
@@ -279,4 +280,51 @@ test("an edit starts at the code of the climate", () => {
 
 test("an edit starts at the first code if the climate has another brand", () => {
   assert.equal(currentCode(editSession(99)), 10);
+});
+
+function answered(session, responded) {
+  return markResult(sendSucceeded(sendStarted(session, "on")), responded);
+}
+
+test("before sending anything, the main action is to turn on", () => {
+  assert.equal(primaryAction(newSession()), "on");
+});
+
+test("after sending, the main action is to confirm that it worked", () => {
+  assert.equal(primaryAction(sendSucceeded(sendStarted(newSession(), "on"))), "worked");
+});
+
+test("after it responded, the main action is to save", () => {
+  assert.equal(primaryAction(answered(newSession(), true)), "save");
+});
+
+test("after it did not respond, the main action is the next code", () => {
+  assert.equal(primaryAction(answered(newSession(), false)), "next");
+});
+
+test("a code without usable commands leads to the next one", () => {
+  const session = newSession({ code: 12, swing_modes: [], available: {} });
+
+  assert.equal(primaryAction(session), "next");
+});
+
+test("when the codes run out, the main action is to go through them again", () => {
+  assert.equal(primaryAction(next(next(next(newSession())))), "restart");
+});
+
+test("sending does not change the main action", () => {
+  assert.equal(primaryAction(sendStarted(newSession(), "on")), "on");
+  assert.equal(primaryAction(sendStarted(answered(newSession(), true), "fan")), "save");
+});
+
+test("a failed send keeps the main action", () => {
+  const session = sendStarted(answered(newSession(), true), "fan");
+
+  assert.equal(primaryAction(sendFailed(session, "error")), "save");
+});
+
+test("changing the code forgets the last answer", () => {
+  const session = withDetails(next(answered(newSession(), true)), DETAILS);
+
+  assert.equal(primaryAction(session), "on");
 });

@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BetterSmartIR: página de prueba</title>
+<style>
+  :root[data-theme="light"] {
+    --primary-color: #009ac7;
+    --text-primary-color: #fff;
+    --primary-background-color: #fafafa;
+    --card-background-color: #fff;
+    --primary-text-color: #141414;
+    --secondary-text-color: #5e5e5e;
+    --divider-color: #0000001f;
+    --error-color: #db4437;
+    --success-color: #43a047;
+    --state-climate-cool-color: #2196f3;
+    --state-climate-heat-color: #ff6f22;
+    --state-climate-dry-color: #ff9800;
+    --state-climate-fan_only-color: #00bcd4;
+    --state-climate-auto-color: #4caf50;
+  }
+  :root[data-theme="dark"] {
+    --primary-color: #009ac7;
+    --text-primary-color: #fff;
+    --primary-background-color: #111;
+    --card-background-color: #1c1c1c;
+    --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b;
+    --divider-color: #e1e1e11f;
+    --error-color: #db4437;
+    --success-color: #43a047;
+    --state-climate-cool-color: #2196f3;
+    --state-climate-heat-color: #ff6f22;
+    --state-climate-dry-color: #ff9800;
+    --state-climate-fan_only-color: #00bcd4;
+    --state-climate-auto-color: #4caf50;
+  }
+  body { margin: 0; background: var(--primary-background-color); color: var(--primary-text-color); }
+  #tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 16px;
+    font: 13px sans-serif;
+    border-bottom: 1px solid var(--divider-color);
+  }
+</style>
+</head>
+<body>
+<div id="tools">
+  <label>Tema
+    <select id="theme"><option value="light">Claro</option><option value="dark">Oscuro</option></select>
+  </label>
+  <label>Idioma
+    <select id="language"><option value="es">Español</option><option value="en">English</option></select>
+  </label>
+  <label><input id="fail" type="checkbox"> El envío falla</label>
+  <label>Demora
+    <select id="delay"><option value="50">50 ms</option><option value="1500">1,5 s</option></select>
+  </label>
+</div>
+<div id="host"></div>
+<script type="module">
+await import("/custom_components/better_smartir/frontend/better-smartir-panel.js");
+
+const temperatures = (from, to) =>
+  Array.from({ length: to - from + 1 }, (_, index) => String(from + index));
+const fans = (values) =>
+  Object.fromEntries(["low", "medium", "high", "auto"].map((fan) => [fan, values]));
+
+const details = {
+  10: {
+    code: 10,
+    manufacturer: "Midea",
+    models: ["RG52C1/BGE (Remote)"],
+    min_temperature: 17,
+    max_temperature: 30,
+    precision: 1,
+    modes: ["auto", "cool", "dry", "heat", "fan_only", "heat_cool"],
+    fan_modes: ["low", "medium", "high", "auto"],
+    swing_modes: [],
+    available: {
+      auto: fans(temperatures(17, 30)),
+      cool: fans(temperatures(17, 30)),
+      dry: { low: temperatures(17, 30) },
+      heat: fans(temperatures(17, 30)),
+      fan_only: { low: ["24"], high: ["24"] },
+      heat_cool: { auto: temperatures(20, 26) },
+    },
+  },
+  11: {
+    code: 11,
+    manufacturer: "Midea",
+    models: ["Un modelo con un nombre muy largo que no debería romper la tarjeta del panel XZ-123456789"],
+    min_temperature: 16,
+    max_temperature: 30,
+    precision: 1,
+    modes: ["cool"],
+    fan_modes: ["low"],
+    swing_modes: ["up", "down", "both"],
+    available: {
+      cool: { low: { up: ["16", "17"], down: ["17", "18"], both: ["18"] } },
+    },
+  },
+  12: {
+    code: 12,
+    manufacturer: "Midea",
+    models: ["Sin comandos"],
+    min_temperature: 16,
+    max_temperature: 30,
+    precision: 1,
+    modes: [],
+    fan_modes: [],
+    swing_modes: [],
+    available: {},
+  },
+};
+
+window.calls = [];
+window.climates = [
+  {
+    climate_id: "a",
+    name: "Clima Living",
+    emitter_entity_id: "remote.living",
+    code: 10,
+    manufacturer: "Midea",
+    temperature_sensor: "sensor.t",
+    humidity_sensor: null,
+    entity_id: "climate.clima_living",
+  },
+  {
+    climate_id: "b",
+    name: "Un clima con un nombre larguísimo para comprobar que la tarjeta no se rompe en un celular",
+    emitter_entity_id: "remote.living",
+    code: 11,
+    manufacturer: "Midea",
+    temperature_sensor: null,
+    humidity_sensor: null,
+    entity_id: "climate.un_clima_con_un_nombre_larguisimo_para_comprobar_la_tarjeta",
+  },
+];
+
+const element = (id) => document.getElementById(id);
+
+async function callWS(message) {
+  window.calls.push(message);
+  const command = message.type.replace("better_smartir/", "");
+  await new Promise((resolve) => setTimeout(resolve, Number(element("delay").value)));
+  switch (command) {
+    case "climates/list":
+      return { climates: window.climates.map((climate) => ({ ...climate })) };
+    case "emitters":
+      return {
+        emitters: [{ entity_id: "remote.living", name: "Control IR Living", state: "on" }],
+      };
+    case "brands":
+      return { brands: [{ name: "Daikin", code_count: 20 }, { name: "Midea", code_count: 3 }] };
+    case "codes":
+      return { codes: Object.values(details).map(({ code, models }) => ({ code, models })) };
+    case "code":
+      return details[message.code];
+    case "test/send":
+      if (element("fail").checked) {
+        throw { code: "emitter_off" };
+      }
+      return { sent: true };
+    case "climates/create":
+      window.climates.push({
+        climate_id: `c${window.climates.length}`,
+        name: message.name.trim(),
+        emitter_entity_id: message.emitter_entity_id,
+        code: message.code,
+        manufacturer: "Midea",
+        temperature_sensor: null,
+        humidity_sensor: null,
+        entity_id: "climate.nuevo",
+      });
+      return { climate_id: "c" };
+    case "climates/update": {
+      const { type, id, climate_id: climateId, ...changes } = message;
+      Object.assign(window.climates.find((item) => item.climate_id === climateId), changes);
+      return { climate_id: climateId };
+    }
+    case "climates/delete":
+      window.climates = window.climates.filter(
+        (climate) => climate.climate_id !== message.climate_id,
+      );
+      return {};
+  }
+  throw { code: "unknown" };
+}
+
+const states = {
+  "sensor.t": {
+    entity_id: "sensor.t",
+    state: "23",
+    attributes: { device_class: "temperature", friendly_name: "Temperatura Living" },
+  },
+  "sensor.h": {
+    entity_id: "sensor.h",
+    state: "40",
+    attributes: { device_class: "humidity", friendly_name: "Humedad Living" },
+  },
+};
+
+function mount() {
+  const panel = document.createElement("better-smartir-panel");
+  panel.hass = { language: element("language").value, states, callWS };
+  element("host").replaceChildren(panel);
+  window.panel = panel;
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = element("theme").value;
+}
+
+element("theme").addEventListener("change", applyTheme);
+element("language").addEventListener("change", mount);
+applyTheme();
+mount();
+</script>
+</body>
+</html>

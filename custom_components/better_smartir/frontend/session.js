@@ -29,6 +29,7 @@ function emptyCodeState() {
     details: null,
     selection: null,
     results: {},
+    lastResult: null,
     sendStatus: "idle",
     sendError: null,
     lastCategory: null,
@@ -153,8 +154,26 @@ export function markResult(session, responded) {
   return {
     ...session,
     results: { ...session.results, [session.lastCategory]: result },
+    lastResult: result,
     sendStatus: "idle",
   };
+}
+
+// The button that stands out in the test screen.
+export function primaryAction(session) {
+  if (session.exhausted) {
+    return "restart";
+  }
+  if (!session.selection) {
+    return "next";
+  }
+  if (session.sendStatus === "sent") {
+    return "worked";
+  }
+  if (session.lastResult === "responded") {
+    return "save";
+  }
+  return session.lastResult === "not_responded" ? "next" : "on";
 }
 
 export function next(session) {

@@ -66,6 +66,11 @@ licencia original está en
 en [`SOURCE.json`](custom_components/better_smartir/catalog_data/SOURCE.json). BetterSmartIR es un
 proyecto independiente de SmartIR.
 
+## Iconos
+
+Los iconos del panel son de [Material Design Icons](https://pictogrammers.com/library/mdi/), bajo licencia
+Apache-2.0.
+
 ## Desarrollo
 
 Tests de Python, que necesitan Docker:
@@ -84,8 +89,10 @@ Tests del panel, que necesitan Node 22 o superior:
 node --test "tests/frontend/*.test.js"
 ```
 
-La especificación y las decisiones de diseño están en
-[`specs/001-climas-ir-prueba-grafica`](specs/001-climas-ir-prueba-grafica).
+Para ver el panel sin Home Assistant, ejecuta `python -m http.server 8765` en la raíz del repositorio y
+abre `http://localhost:8765/tests/frontend/harness.html`.
+
+La especificación y las decisiones de diseño están en [`specs`](specs).
 
 ## Licencia
 
