@@ -65,20 +65,24 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     if hass.data.get(DATA_PANEL_REGISTERED):
         return
 
+    # The version goes in the path so that the imports of the panel inherit it:
+    # a browser must not mix a new panel with modules cached from another version.
+    integration = await async_get_integration(hass, DOMAIN)
+    static_url = f"{STATIC_URL}/{integration.version}"
+
     if not hass.data.get(DATA_STATIC_REGISTERED):
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
+            [StaticPathConfig(static_url, str(FRONTEND_DIR), cache_headers=False)]
         )
         hass.data[DATA_STATIC_REGISTERED] = True
 
-    integration = await async_get_integration(hass, DOMAIN)
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_COMPONENT_NAME,
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
-        module_url=f"{STATIC_URL}/{PANEL_COMPONENT_NAME}.js?v={integration.version}",
+        module_url=f"{static_url}/{PANEL_COMPONENT_NAME}.js",
         require_admin=True,
     )
     hass.data[DATA_PANEL_REGISTERED] = True

@@ -4,10 +4,16 @@ from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.better_smartir.const import DOMAIN, PANEL_URL_PATH
+from custom_components.better_smartir.const import (
+    DOMAIN,
+    PANEL_COMPONENT_NAME,
+    PANEL_URL_PATH,
+    STATIC_URL,
+)
 from homeassistant.components.frontend import DATA_PANELS
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 from homeassistant.setup import async_setup_component
 
 from .conftest import add_climate
@@ -22,6 +28,21 @@ async def test_panel_is_admin_only_and_needs_no_restart(
     assert hub.state is ConfigEntryState.LOADED
     assert panel.require_admin is True
     assert panel.sidebar_title == "BetterSmartIR"
+
+
+async def test_panel_modules_share_the_version_of_the_panel(
+    hass: HomeAssistant, hub: MockConfigEntry, hass_client
+) -> None:
+    """A relative import must not reach a module cached from another version."""
+    integration = await async_get_integration(hass, DOMAIN)
+    module_url = hass.data[DATA_PANELS][PANEL_URL_PATH].config["_panel_custom"]["module_url"]
+    folder = f"{STATIC_URL}/{integration.version}"
+
+    assert module_url == f"{folder}/{PANEL_COMPONENT_NAME}.js"
+
+    client = await hass_client()
+    for name in ("better-smartir-panel.js", "session.js", "virtual_climate.js"):
+        assert (await client.get(f"{folder}/{name}")).status == 200
 
 
 async def test_panel_survives_a_reload(

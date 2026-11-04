@@ -121,3 +121,6 @@ Medido el 2026-11-04 con la versión 0.3.0 en Home Assistant 2026.10.3, con un B
 - **Control no disponible**: se probó en la página de prueba, sin `loadCardHelpers` y con una tarjeta que no
   pide los contextos.
 - **No observado**: estas pruebas leen el estado de Home Assistant. Que el aire obedeciera no se observó.
+- **Caché del panel**: un teléfono mezcló el panel 0.3.0 con `session.js` de la 0.2.0 y mostró el código 1390 como
+  sin comandos. La versión pasó de la URL del panel a la ruta de todos sus archivos. En ese teléfono, el control
+  volvió a aparecer.
