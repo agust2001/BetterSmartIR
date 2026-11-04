@@ -744,4 +744,7 @@ class BetterSmartIRPanel extends HTMLElement {
   }
 }
 
-customElements.define("better-smartir-panel", BetterSmartIRPanel);
+// A client open during an update loads the new version next to the old one.
+if (!customElements.get("better-smartir-panel")) {
+  customElements.define("better-smartir-panel", BetterSmartIRPanel);
+}
