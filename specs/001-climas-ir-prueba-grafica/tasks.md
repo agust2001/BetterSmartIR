@@ -147,7 +147,7 @@ tests se escriben primero y deben fallar antes de implementar.
 
 - [X] T045 [P] Completar `README.md` con instalación por HACS, el paso único de agregar la integración, uso del panel, limitaciones y atribución a SmartIR con su licencia MIT
 - [X] T046 [P] Agregar los recursos de marca en `custom_components/better_smartir/brand/` (R12)
-- [ ] T047 Subir el código a `agust2001/BetterSmartIR` y comprobar que pasan los tests, `hassfest` y la validación de HACS de `.github/workflows/validate.yml`
+- [X] T047 Subir el código a `agust2001/BetterSmartIR` y comprobar que pasan los tests, `hassfest` y la validación de HACS de `.github/workflows/validate.yml`
 - [X] T048 Comprobar en una instancia real cómo se ven las subentradas en Dispositivos y servicios y, si hace falta, declarar el tipo en `custom_components/better_smartir/config_flow.py` (riesgo del plan)
 - [X] T049 Medir en una instancia real cuánto tarda la recarga y comprobar SC-002 y SC-005; registrar el resultado en `specs/001-climas-ir-prueba-grafica/research.md`
 - [ ] T050 Ejecutar todos los tests y la validación manual de `specs/001-climas-ir-prueba-grafica/quickstart.md` con un Broadlink y un aire reales
