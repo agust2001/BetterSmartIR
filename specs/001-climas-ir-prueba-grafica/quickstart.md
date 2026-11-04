@@ -1,7 +1,6 @@
 # Guía de validación: Climas IR con prueba gráfica
 
-Esta guía comprueba que la feature funciona de punta a punta. Los archivos y comandos que menciona se
-crean durante la implementación; todavía no existen. Ver [contrato](contracts/websocket-api.md) y
+Esta guía comprueba que la feature funciona de punta a punta. Ver [contrato](contracts/websocket-api.md) y
 [modelo de datos](data-model.md).
 
 ## Requisitos

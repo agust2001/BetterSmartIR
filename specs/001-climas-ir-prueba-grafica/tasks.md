@@ -107,16 +107,16 @@ tests se escriben primero y deben fallar antes de implementar.
 
 ### Tests de la historia 2
 
-- [ ] T035 [P] [US2] Agregar a `tests/test_websocket_api.py` los tests de `climates/update`: cambia cada campo, conserva `subentry_id` y `entity_id`, un sensor con `null` se desasocia, y `climate_not_found` (FR-018, FR-019)
-- [ ] T036 [P] [US2] Agregar a `tests/test_climate.py` los tests de sensores: muestra temperatura y humedad, sigue funcionando si el sensor no está disponible, y aplica un cambio de emisor o de código sin reiniciar (FR-018, FR-019, FR-025)
-- [ ] T037 [P] [US2] Agregar a `tests/frontend/session.test.js` los tests de edición: salir sin guardar no genera ningún cambio y guardar usa `climates/update` (FR-020)
+- [X] T035 [P] [US2] Agregar a `tests/test_websocket_api.py` los tests de `climates/update`: cambia cada campo, conserva `subentry_id` y `entity_id`, un sensor con `null` se desasocia, y `climate_not_found` (FR-018, FR-019)
+- [X] T036 [P] [US2] Agregar a `tests/test_climate.py` los tests de sensores: muestra temperatura y humedad, sigue funcionando si el sensor no está disponible, y aplica un cambio de emisor o de código sin reiniciar (FR-018, FR-019, FR-025)
+- [X] T037 [P] [US2] Agregar a `tests/frontend/session.test.js` los tests de edición: salir sin guardar no genera ningún cambio y guardar usa `climates/update` (FR-020)
 
 ### Implementación de la historia 2
 
-- [ ] T038 [US2] Implementar `climates/update` en `custom_components/better_smartir/websocket_api.py` con `async_update_subentry` (FR-018, FR-019)
-- [ ] T039 [US2] Agregar a `custom_components/better_smartir/climate.py` el seguimiento de los sensores opcionales de temperatura y humedad (FR-025)
-- [ ] T040 [US2] Agregar `editingClimateId` a `custom_components/better_smartir/frontend/session.js` (FR-020)
-- [ ] T041 [US2] Agregar a `custom_components/better_smartir/frontend/better-smartir-panel.js` la vista de edición con nombre, emisor y sensores, y el acceso a la pantalla de prueba desde un clima existente (FR-018, FR-020, FR-025)
+- [X] T038 [US2] Implementar `climates/update` en `custom_components/better_smartir/websocket_api.py` con `async_update_subentry` (FR-018, FR-019)
+- [X] T039 [US2] Agregar a `custom_components/better_smartir/climate.py` el seguimiento de los sensores opcionales de temperatura y humedad (FR-025)
+- [X] T040 [US2] Agregar `editingClimateId` a `custom_components/better_smartir/frontend/session.js` (FR-020)
+- [X] T041 [US2] Agregar a `custom_components/better_smartir/frontend/better-smartir-panel.js` la vista de edición con nombre, emisor y sensores, y el acceso a la pantalla de prueba desde un clima existente (FR-018, FR-020, FR-025)
 
 **Punto de control**: las Historias 1 y 2 funcionan.
 
@@ -130,12 +130,12 @@ tests se escriben primero y deben fallar antes de implementar.
 
 ### Tests de la historia 3
 
-- [ ] T042 [US3] Agregar a `tests/test_websocket_api.py` los tests de `climates/delete`: quita la subentrada, su entidad y su dispositivo, deja intactos los demás climas, y `climate_not_found` (FR-021)
+- [X] T042 [US3] Agregar a `tests/test_websocket_api.py` los tests de `climates/delete`: quita la subentrada, su entidad y su dispositivo, deja intactos los demás climas, y `climate_not_found` (FR-021)
 
 ### Implementación de la historia 3
 
-- [ ] T043 [US3] Implementar `climates/delete` en `custom_components/better_smartir/websocket_api.py` con `async_remove_subentry` (FR-021)
-- [ ] T044 [US3] Agregar a `custom_components/better_smartir/frontend/better-smartir-panel.js` la acción de borrar con confirmación (FR-021, FR-024)
+- [X] T043 [US3] Implementar `climates/delete` en `custom_components/better_smartir/websocket_api.py` con `async_remove_subentry` (FR-021)
+- [X] T044 [US3] Agregar a `custom_components/better_smartir/frontend/better-smartir-panel.js` la acción de borrar con confirmación (FR-021, FR-024)
 
 **Punto de control**: las tres historias funcionan.
 
@@ -145,13 +145,13 @@ tests se escriben primero y deben fallar antes de implementar.
 
 **Propósito**: Preparar la publicación y validar con hardware real.
 
-- [ ] T045 [P] Completar `README.md` con instalación por HACS, el paso único de agregar la integración, uso del panel, limitaciones y atribución a SmartIR con su licencia MIT
-- [ ] T046 [P] Agregar los recursos de marca en `brand/` (R12)
+- [X] T045 [P] Completar `README.md` con instalación por HACS, el paso único de agregar la integración, uso del panel, limitaciones y atribución a SmartIR con su licencia MIT
+- [X] T046 [P] Agregar los recursos de marca en `custom_components/better_smartir/brand/` (R12)
 - [ ] T047 Subir el código a `agust2001/BetterSmartIR` y comprobar que pasan los tests, `hassfest` y la validación de HACS de `.github/workflows/validate.yml`
-- [ ] T048 Comprobar en una instancia real cómo se ven las subentradas en Dispositivos y servicios y, si hace falta, declarar el tipo en `custom_components/better_smartir/config_flow.py` (riesgo del plan)
-- [ ] T049 Medir en una instancia real cuánto tarda la recarga y comprobar SC-002 y SC-005; registrar el resultado en `specs/001-climas-ir-prueba-grafica/research.md`
+- [X] T048 Comprobar en una instancia real cómo se ven las subentradas en Dispositivos y servicios y, si hace falta, declarar el tipo en `custom_components/better_smartir/config_flow.py` (riesgo del plan)
+- [X] T049 Medir en una instancia real cuánto tarda la recarga y comprobar SC-002 y SC-005; registrar el resultado en `specs/001-climas-ir-prueba-grafica/research.md`
 - [ ] T050 Ejecutar todos los tests y la validación manual de `specs/001-climas-ir-prueba-grafica/quickstart.md` con un Broadlink y un aire reales
-- [ ] T051 Revisar el cumplimiento de `.specify/memory/constitution.md` y actualizar la tabla de `specs/001-climas-ir-prueba-grafica/plan.md`
+- [X] T051 Revisar el cumplimiento de `.specify/memory/constitution.md` y actualizar la tabla de `specs/001-climas-ir-prueba-grafica/plan.md`
 
 ---
 

@@ -56,7 +56,11 @@ alterar; nada de lectura de archivos en el bucle de eventos
 | II. Configuración desde la UI | Panel y flujo de alta; `CONFIG_SCHEMA` de solo entradas de configuración | Cumple | Cumple |
 | III. Sin reinicios | Recarga de la entrada al cambiar subentradas (R4) | Cumple | Cumple |
 | IV. Código con tests | Tests de Python, del panel y del catálogo (R11) | Cumple | Cumple |
-| V. Guías de Home Assistant | Flujo de configuración, `runtime_data`, `probatio`, lectura de archivos en hilo aparte, traducciones | Cumple | Cumple, con una desviación justificada abajo |
+| V. Guías de Home Assistant | Flujo de configuración, `probatio`, lectura de archivos en hilo aparte, traducciones | Cumple | Cumple, con una desviación justificada abajo |
+
+**Revisión tras implementar (T051)**: los cinco principios se siguen cumpliendo. La marca quedó en
+`custom_components/better_smartir/brand/`. No se usa `runtime_data` porque la entrada no guarda estado
+propio: cada entidad toma lo que necesita de su subentrada.
 
 **Resultado**: la puerta se supera. Instalar la integración y agregarla una vez desde Dispositivos y
 servicios no es un cambio de configuración de climas, conforme al principio III.

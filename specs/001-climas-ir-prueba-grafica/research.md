@@ -148,9 +148,21 @@ de la marca DEBE normalizarse así para que no aparezca duplicada en la lista.
 ## R12. Requisitos de HACS
 
 - **Decisión**: una sola integración en `custom_components/better_smartir/`, con `hacs.json` y
-  `README.md` en la raíz, y una carpeta `brand/` con los recursos de marca.
+  `README.md` en la raíz, y los recursos de marca en `custom_components/better_smartir/brand/`.
 - **Razón**: HACS exige una integración por repositorio, todos sus archivos dentro de su carpeta, y
   las claves `domain`, `documentation`, `issue_tracker`, `codeowners`, `name` y `version` en
-  `manifest.json`. También exige recursos de marca.
-- **Consecuencia**: `documentation` e `issue_tracker` necesitan un repositorio público en GitHub, que
-  todavía no existe.
+  `manifest.json`. También exige recursos de marca, y desde Home Assistant 2026.3 una integración
+  personalizada puede incluirlos en una carpeta `brand/` dentro de la suya.
+- **Consecuencia**: `documentation` e `issue_tracker` necesitan un repositorio público en GitHub.
+
+## Mediciones en una instancia real
+
+Medido el 2026-11-04 en Home Assistant 2026.10.3, con un clima y un Broadlink reales.
+
+- **Recarga (T049)**: al cambiar el clima, el historial registra `climate.clima_living` como
+  `unavailable` durante 4 ms antes de volver a su estado. Es una sola medición, pero queda muy lejos de
+  los 10 segundos de SC-002 y SC-005, y no hace falta pasar a actualizaciones por entidad.
+- **Cambio sin reinicio**: el clima pasó del código 1380 al 1390 y recibió un sensor de temperatura. La
+  hora de inicio de Home Assistant no cambió y la entidad conservó su identificador.
+- **Subentradas (T048)**: la persona que hizo la prueba no encontró problemas en Dispositivos y
+  servicios, así que no se declara el tipo de subentrada en `config_flow.py`.
