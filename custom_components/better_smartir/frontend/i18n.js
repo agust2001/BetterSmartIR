@@ -3,6 +3,16 @@
 const TEXTS = {
   en: {
     add_climate: "Add climate",
+    edit: "Change",
+    delete: "Delete",
+    edit_climate: "Change climate",
+    test_code: "Test or change the code",
+    temperature_sensor: "Temperature sensor",
+    humidity_sensor: "Humidity sensor",
+    no_sensor: "None",
+    delete_question: "Delete {name}?",
+    delete_warning:
+      "Its entity {entity} will disappear, and the automations that use it will stop working.",
     no_climates: "You have no climates yet. Add your air conditioner to get started.",
     code_label: "Code {code}",
     emitter: "IR emitter",
@@ -64,6 +74,16 @@ const TEXTS = {
   },
   es: {
     add_climate: "Agregar clima",
+    edit: "Cambiar",
+    delete: "Borrar",
+    edit_climate: "Cambiar clima",
+    test_code: "Probar o cambiar el código",
+    temperature_sensor: "Sensor de temperatura",
+    humidity_sensor: "Sensor de humedad",
+    no_sensor: "Ninguno",
+    delete_question: "¿Borrar {name}?",
+    delete_warning:
+      "Su entidad {entity} desaparecerá, y las automatizaciones que la usen dejarán de funcionar.",
     no_climates: "Todavía no tienes climas. Agrega tu aire acondicionado para empezar.",
     code_label: "Código {code}",
     emitter: "Emisor IR",

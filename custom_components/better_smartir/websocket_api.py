@@ -31,6 +31,7 @@ from .const import (
 )
 
 ERROR_BRAND_NOT_FOUND = "brand_not_found"
+ERROR_CLIMATE_NOT_FOUND = "climate_not_found"
 ERROR_CODE_NOT_FOUND = "code_not_found"
 ERROR_COMBINATION = "combination_not_available"
 ERROR_INVALID_NAME = "invalid_name"
@@ -38,6 +39,7 @@ ERROR_INVALID_SENSOR = "invalid_sensor"
 ERROR_NOT_CONFIGURED = "not_configured"
 
 SENSOR_DOMAIN = "sensor"
+SENSOR_KEYS = (CONF_TEMPERATURE_SENSOR, CONF_HUMIDITY_SENSOR)
 TYPE_PREFIX = f"{DOMAIN}/"
 
 
@@ -52,6 +54,8 @@ def async_register(hass: HomeAssistant) -> None:
         ws_test_send,
         ws_climates_list,
         ws_climates_create,
+        ws_climates_update,
+        ws_climates_delete,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -204,6 +208,21 @@ def _is_sensor(value: str | None) -> bool:
     )
 
 
+async def _async_invalid_field(hass: HomeAssistant, msg: dict[str, Any]) -> str | None:
+    """Return the error of the fields of a climate that come in a message."""
+    if "name" in msg and not msg["name"].strip():
+        return ERROR_INVALID_NAME
+    if CONF_EMITTER in msg and not emitter.async_is_emitter(hass, msg[CONF_EMITTER]):
+        return emitter.ERROR_NOT_FOUND
+    if CONF_CODE in msg:
+        catalog = await async_get_catalog(hass)
+        if catalog.entry(msg[CONF_CODE]) is None:
+            return ERROR_CODE_NOT_FOUND
+    if not all(_is_sensor(msg.get(key)) for key in SENSOR_KEYS):
+        return ERROR_INVALID_SENSOR
+    return None
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {probatio.Required("type"): f"{TYPE_PREFIX}climates/list"}
@@ -263,33 +282,87 @@ async def ws_climates_create(
     if (hub := _async_get_hub(hass)) is None:
         _send_error(connection, msg, ERROR_NOT_CONFIGURED)
         return
-    name = msg["name"].strip()
-    if not name:
-        _send_error(connection, msg, ERROR_INVALID_NAME)
+    if (error := await _async_invalid_field(hass, msg)) is not None:
+        _send_error(connection, msg, error)
         return
-    if not emitter.async_is_emitter(hass, msg[CONF_EMITTER]):
-        _send_error(connection, msg, emitter.ERROR_NOT_FOUND)
-        return
-    catalog = await async_get_catalog(hass)
-    if catalog.entry(msg[CONF_CODE]) is None:
-        _send_error(connection, msg, ERROR_CODE_NOT_FOUND)
-        return
-    sensors = {
-        key: msg[key]
-        for key in (CONF_TEMPERATURE_SENSOR, CONF_HUMIDITY_SENSOR)
-        if msg.get(key) is not None
-    }
-    if not all(_is_sensor(value) for value in sensors.values()):
-        _send_error(connection, msg, ERROR_INVALID_SENSOR)
-        return
+    sensors = {key: msg[key] for key in SENSOR_KEYS if msg.get(key) is not None}
 
     subentry = ConfigSubentry(
         data=MappingProxyType(
             {CONF_EMITTER: msg[CONF_EMITTER], CONF_CODE: msg[CONF_CODE], **sensors}
         ),
         subentry_type=SUBENTRY_TYPE_CLIMATE,
-        title=name,
+        title=msg["name"].strip(),
         unique_id=None,
     )
     hass.config_entries.async_add_subentry(hub, subentry)
     connection.send_result(msg["id"], {"climate_id": subentry.subentry_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): f"{TYPE_PREFIX}climates/update",
+        probatio.Required("climate_id"): str,
+        probatio.Optional("name"): str,
+        probatio.Optional(CONF_EMITTER): str,
+        probatio.Optional(CONF_CODE): int,
+        probatio.Optional(CONF_TEMPERATURE_SENSOR): probatio.Any(str, None),
+        probatio.Optional(CONF_HUMIDITY_SENSOR): probatio.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_climates_update(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Change a climate. Its entity keeps its identity through the reload."""
+    if (hub := _async_get_hub(hass)) is None:
+        _send_error(connection, msg, ERROR_NOT_CONFIGURED)
+        return
+    if (subentry := hub.subentries.get(msg["climate_id"])) is None:
+        _send_error(connection, msg, ERROR_CLIMATE_NOT_FOUND)
+        return
+    if (error := await _async_invalid_field(hass, msg)) is not None:
+        _send_error(connection, msg, error)
+        return
+
+    data = dict(subentry.data)
+    for key in (CONF_EMITTER, CONF_CODE, *SENSOR_KEYS):
+        if key in msg:
+            data[key] = msg[key]
+    for key in SENSOR_KEYS:
+        if data.get(key) is None:
+            data.pop(key, None)
+    hass.config_entries.async_update_subentry(
+        hub,
+        subentry,
+        data=data,
+        title=msg["name"].strip() if "name" in msg else subentry.title,
+    )
+    connection.send_result(msg["id"], {"climate_id": subentry.subentry_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): f"{TYPE_PREFIX}climates/delete",
+        probatio.Required("climate_id"): str,
+    }
+)
+@callback
+def ws_climates_delete(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Delete a climate, with its entity and its device."""
+    if (hub := _async_get_hub(hass)) is None:
+        _send_error(connection, msg, ERROR_NOT_CONFIGURED)
+        return
+    if msg["climate_id"] not in hub.subentries:
+        _send_error(connection, msg, ERROR_CLIMATE_NOT_FOUND)
+        return
+    hass.config_entries.async_remove_subentry(hub, msg["climate_id"])
+    connection.send_result(msg["id"], {})

@@ -10,12 +10,14 @@ import {
   pendingSummary,
   previous,
   restart,
+  saveRequest,
   select,
   sendFailed,
   sendRequest,
   sendStarted,
   sendSucceeded,
   stepTemperature,
+  updateRequest,
   withDetails,
 } from "../../custom_components/better_smartir/frontend/session.js";
 
@@ -198,4 +200,83 @@ test("the summary lists failed and untested commands", () => {
 
 test("the summary only includes swing if the code has it", () => {
   assert.ok(pendingSummary(newSession(SWING_DETAILS)).untested.includes("swing"));
+});
+
+const CLIMATE = {
+  climate_id: "abc",
+  name: "Living",
+  emitter_entity_id: "remote.living",
+  code: 10,
+  manufacturer: "LG",
+  temperature_sensor: null,
+  humidity_sensor: "sensor.humidity",
+  entity_id: "climate.living",
+};
+
+const FORM = {
+  name: "Living",
+  emitter_entity_id: "remote.living",
+  temperature_sensor: null,
+  humidity_sensor: "sensor.humidity",
+};
+
+function editSession(startCode) {
+  const session = createSession({
+    emitter: "remote.living",
+    brand: "LG",
+    codes: [{ code: 10 }, { code: 11 }, { code: 12 }],
+    editingClimateId: "abc",
+    startCode,
+  });
+  return withDetails(session, DETAILS);
+}
+
+test("saving a new climate creates it", () => {
+  assert.deepEqual(saveRequest(newSession(), { name: "Living" }), {
+    command: "climates/create",
+    data: { name: "Living", emitter_entity_id: "remote.living", code: 10 },
+  });
+});
+
+test("saving an edit updates the climate with what changed", () => {
+  const session = next(editSession());
+
+  assert.deepEqual(saveRequest(session, FORM, CLIMATE), {
+    command: "climates/update",
+    data: { climate_id: "abc", code: 11 },
+  });
+});
+
+test("saving an edit includes the changes made before testing", () => {
+  const form = { ...FORM, name: "Bedroom", temperature_sensor: "sensor.temperature" };
+
+  assert.deepEqual(saveRequest(next(editSession()), form, CLIMATE), {
+    command: "climates/update",
+    data: {
+      climate_id: "abc",
+      name: "Bedroom",
+      temperature_sensor: "sensor.temperature",
+      code: 11,
+    },
+  });
+});
+
+test("an edit without changes sends nothing", () => {
+  assert.equal(updateRequest(CLIMATE, FORM), null);
+  assert.equal(saveRequest(editSession(), FORM, CLIMATE), null);
+});
+
+test("removing a sensor is sent as null", () => {
+  assert.deepEqual(updateRequest(CLIMATE, { ...FORM, humidity_sensor: null }), {
+    command: "climates/update",
+    data: { climate_id: "abc", humidity_sensor: null },
+  });
+});
+
+test("an edit starts at the code of the climate", () => {
+  assert.equal(currentCode(editSession(11)), 11);
+});
+
+test("an edit starts at the first code if the climate has another brand", () => {
+  assert.equal(currentCode(editSession(99)), 10);
 });

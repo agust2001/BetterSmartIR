@@ -89,7 +89,13 @@ const STYLES = `
     color: var(--text-primary-color, #fff);
   }
   ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-  li { padding: 12px; border-radius: 8px; border: 1px solid var(--divider-color); }
+  li {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--divider-color);
+  }
 `;
 
 function escapeHtml(value) {
@@ -112,6 +118,9 @@ class BetterSmartIRPanel extends HTMLElement {
     this._brand = null;
     this._session = null;
     this._name = "";
+    this._editing = null;
+    this._sensors = {};
+    this._deleting = null;
     this._error = null;
     this._narrow = false;
     this.shadowRoot.addEventListener("click", (event) => this._onClick(event));
@@ -175,6 +184,32 @@ class BetterSmartIRPanel extends HTMLElement {
     });
   }
 
+  _startEdit(climate) {
+    return this._run(async () => {
+      const { emitters } = await this._call("emitters");
+      this._emitters = emitters;
+      this._editing = climate;
+      this._name = climate.name;
+      this._emitter = climate.emitter_entity_id;
+      this._sensors = {
+        temperature_sensor: climate.temperature_sensor,
+        humidity_sensor: climate.humidity_sensor,
+      };
+      this._view = "edit";
+    });
+  }
+
+  _startCodeChange() {
+    return this._run(async () => {
+      const { brands } = await this._call("brands");
+      const manufacturer = this._editing.manufacturer?.toLowerCase();
+      const brand = brands.find(({ name }) => name.toLowerCase() === manufacturer);
+      this._brands = brands;
+      this._brand = (brand ?? brands[0])?.name ?? null;
+      this._view = "select";
+    });
+  }
+
   _startTest() {
     return this._run(async () => {
       const { codes } = await this._call("codes", { brand: this._brand });
@@ -182,6 +217,8 @@ class BetterSmartIRPanel extends HTMLElement {
         emitter: this._emitter,
         brand: this._brand,
         codes,
+        editingClimateId: this._editing?.climate_id,
+        startCode: this._editing?.code,
       });
       await this._loadCode();
       this._view = "test";
@@ -220,27 +257,56 @@ class BetterSmartIRPanel extends HTMLElement {
     this._render();
   }
 
+  _form() {
+    return this._editing
+      ? { name: this._name, emitter_entity_id: this._emitter, ...this._sensors }
+      : { name: this._name };
+  }
+
   _save() {
     return this._run(async () => {
-      await this._call("climates/create", {
-        name: this._name,
-        emitter_entity_id: this._session.emitter,
-        code: session.currentCode(this._session),
-      });
-      this._session = null;
-      this._name = "";
-      this._view = "list";
+      const request = this._session
+        ? session.saveRequest(this._session, this._form(), this._editing)
+        : session.updateRequest(this._editing, this._form());
+      if (request) {
+        await this._call(request.command, request.data);
+      }
+      this._showList();
       await this._loadClimates();
       setTimeout(() => this._loadClimates(), REFRESH_AFTER_SAVE_MS);
     });
   }
 
-  _cancel() {
+  _delete() {
+    return this._run(async () => {
+      await this._call("climates/delete", { climate_id: this._deleting.climate_id });
+      this._showList();
+      await this._loadClimates();
+    });
+  }
+
+  _showList() {
     this._session = null;
     this._name = "";
-    this._error = null;
+    this._editing = null;
+    this._deleting = null;
     this._view = "list";
+  }
+
+  // Leaving a test of an existing climate goes back to it, without changing it.
+  _cancel() {
+    this._error = null;
+    if (this._editing && this._view !== "edit") {
+      this._session = null;
+      this._view = "edit";
+    } else {
+      this._showList();
+    }
     this._render();
+  }
+
+  _climate(id) {
+    return this._climates.find((climate) => climate.climate_id === id);
   }
 
   _onClick(event) {
@@ -248,7 +314,7 @@ class BetterSmartIRPanel extends HTMLElement {
     if (!button || button.disabled) {
       return;
     }
-    const { action, category, value } = button.dataset;
+    const { action, category, climate, value } = button.dataset;
     switch (action) {
       case "menu":
         this.dispatchEvent(
@@ -257,6 +323,21 @@ class BetterSmartIRPanel extends HTMLElement {
         break;
       case "add":
         this._startAdd();
+        break;
+      case "edit":
+        this._startEdit(this._climate(climate));
+        break;
+      case "ask-delete":
+        this._error = null;
+        this._deleting = this._climate(climate);
+        this._view = "delete";
+        this._render();
+        break;
+      case "delete":
+        this._delete();
+        break;
+      case "change-code":
+        this._startCodeChange();
         break;
       case "start":
         this._startTest();
@@ -308,6 +389,8 @@ class BetterSmartIRPanel extends HTMLElement {
       this._emitter = event.target.value;
     } else if (event.target.name === "brand") {
       this._brand = event.target.value;
+    } else if (event.target.name in this._sensors) {
+      this._sensors[event.target.name] = event.target.value || null;
     }
   }
 
@@ -323,6 +406,8 @@ class BetterSmartIRPanel extends HTMLElement {
     const focused = this.shadowRoot.activeElement?.dataset?.focusKey;
     const views = {
       list: () => this._renderList(),
+      edit: () => this._renderEdit(),
+      delete: () => this._renderDelete(),
       select: () => this._renderSelect(),
       test: () => this._renderTest(),
       save: () => this._renderSave(),
@@ -363,6 +448,10 @@ class BetterSmartIRPanel extends HTMLElement {
               ${escapeHtml(climate.manufacturer)} · ${escapeHtml(t("code_label", { code: climate.code }))}
               · ${escapeHtml(climate.entity_id ?? "…")}
             </p>
+            <div class="row">
+              ${this._button(t("edit"), { action: "edit", climate: climate.climate_id })}
+              ${this._button(t("delete"), { action: "ask-delete", climate: climate.climate_id })}
+            </div>
           </li>`,
       )
       .join("");
@@ -370,6 +459,82 @@ class BetterSmartIRPanel extends HTMLElement {
       <section>
         ${items ? `<ul>${items}</ul>` : `<p class="muted">${escapeHtml(t("no_climates"))}</p>`}
         <div>${this._button(t("add_climate"), { action: "add" }, { primary: true })}</div>
+      </section>`;
+  }
+
+  // A value that is no longer offered stays visible, so it is not lost by accident.
+  _options(items, selected) {
+    const all = items.some(({ value }) => value === selected) || !selected
+      ? items
+      : [{ value: selected, label: selected }, ...items];
+    return all
+      .map(
+        ({ value, label }) =>
+          `<option value="${escapeHtml(value)}" ${value === (selected ?? "") ? "selected" : ""}>${escapeHtml(label)}</option>`,
+      )
+      .join("");
+  }
+
+  _emitterOptions() {
+    return this._options(
+      this._emitters.map(({ entity_id, name }) => ({ value: entity_id, label: name })),
+      this._emitter,
+    );
+  }
+
+  _renderSensor(key, deviceClass) {
+    const t = this._t;
+    const sensors = Object.values(this._hass.states)
+      .filter(
+        ({ entity_id, attributes }) =>
+          entity_id.startsWith("sensor.") && attributes.device_class === deviceClass,
+      )
+      .map(({ entity_id, attributes }) => ({
+        value: entity_id,
+        label: attributes.friendly_name ?? entity_id,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const options = this._options(
+      [{ value: "", label: t("no_sensor") }, ...sensors],
+      this._sensors[key],
+    );
+    return `<label>${escapeHtml(t(key))}<select name="${key}">${options}</select></label>`;
+  }
+
+  _renderEdit() {
+    const t = this._t;
+    const { code, manufacturer } = this._editing;
+    return `
+      <section>
+        <h2>${escapeHtml(t("edit_climate"))}</h2>
+        <label>${escapeHtml(t("climate_name"))}
+          <input name="name" value="${escapeHtml(this._name)}" data-focus-key="name" autocomplete="off">
+        </label>
+        <label>${escapeHtml(t("emitter"))}<select name="emitter">${this._emitterOptions()}</select></label>
+        ${this._renderSensor("temperature_sensor", "temperature")}
+        ${this._renderSensor("humidity_sensor", "humidity")}
+        <p class="muted">
+          ${escapeHtml(manufacturer)} · ${escapeHtml(t("code_label", { code }))}
+        </p>
+        <div>${this._button(t("test_code"), { action: "change-code" }, { disabled: !this._emitters.length })}</div>
+        <div class="row">
+          ${this._button(t("confirm_save"), { action: "save" }, { primary: true, disabled: !this._name.trim() })}
+          ${this._button(t("cancel"), { action: "cancel" })}
+        </div>
+      </section>`;
+  }
+
+  _renderDelete() {
+    const t = this._t;
+    const { name, entity_id: entity } = this._deleting;
+    return `
+      <section>
+        <h2>${escapeHtml(t("delete_question", { name }))}</h2>
+        <p>${escapeHtml(t("delete_warning", { entity }))}</p>
+        <div class="row">
+          ${this._button(t("delete"), { action: "delete" }, { primary: true })}
+          ${this._button(t("cancel"), { action: "cancel" })}
+        </div>
       </section>`;
   }
 
@@ -383,12 +548,6 @@ class BetterSmartIRPanel extends HTMLElement {
           <div>${cancel}</div>
         </section>`;
     }
-    const emitters = this._emitters
-      .map(
-        (emitter) =>
-          `<option value="${escapeHtml(emitter.entity_id)}" ${emitter.entity_id === this._emitter ? "selected" : ""}>${escapeHtml(emitter.name)}</option>`,
-      )
-      .join("");
     const brands = this._brands
       .map(
         (brand) =>
@@ -397,8 +556,8 @@ class BetterSmartIRPanel extends HTMLElement {
       .join("");
     return `
       <section>
-        <h2>${escapeHtml(t("add_climate"))}</h2>
-        <label>${escapeHtml(t("emitter"))}<select name="emitter">${emitters}</select></label>
+        <h2>${escapeHtml(t(this._editing ? "test_code" : "add_climate"))}</h2>
+        <label>${escapeHtml(t("emitter"))}<select name="emitter">${this._emitterOptions()}</select></label>
         <label>${escapeHtml(t("brand"))}<select name="brand">${brands}</select></label>
         <p class="muted">${escapeHtml(t("brand_hint"))}</p>
         <div class="row">

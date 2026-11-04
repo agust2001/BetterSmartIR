@@ -3,13 +3,22 @@
 
 export const CATEGORIES = ["on", "off", "mode", "temperature", "fan", "swing"];
 
-export function createSession({ emitter, brand, codes, editingClimateId = null }) {
+export function createSession({
+  emitter,
+  brand,
+  codes,
+  editingClimateId = null,
+  startCode = null,
+}) {
   return {
     emitter,
     brand,
     codes,
     editingClimateId,
-    position: 0,
+    position: Math.max(
+      codes.findIndex(({ code }) => code === startCode),
+      0,
+    ),
     exhausted: false,
     ...emptyCodeState(),
   };
@@ -169,6 +178,30 @@ export function previous(session) {
 
 export function restart(session) {
   return { ...session, position: 0, exhausted: false, ...emptyCodeState() };
+}
+
+// Sends only what changed, so a value that is no longer valid, like an emitter
+// that was removed, does not block changing the rest.
+export function updateRequest(climate, form) {
+  const changes = Object.entries(form).filter(([key, value]) => value !== climate[key]);
+  if (!changes.length) {
+    return null;
+  }
+  return {
+    command: "climates/update",
+    data: { climate_id: climate.climate_id, ...Object.fromEntries(changes) },
+  };
+}
+
+export function saveRequest(session, form, climate = null) {
+  const data = {
+    ...form,
+    emitter_entity_id: session.emitter,
+    code: currentCode(session),
+  };
+  return session.editingClimateId
+    ? updateRequest(climate, data)
+    : { command: "climates/create", data };
 }
 
 export function pendingSummary(session) {

@@ -285,3 +285,120 @@ async def test_available_while_the_emitter_is_off(hass: HomeAssistant, living) -
     await hass.async_block_till_done()
 
     assert hass.states.get(ENTITY).state == "off"
+
+
+async def test_shows_the_values_of_the_sensors(
+    hass: HomeAssistant, hub: MockConfigEntry, emitter: str
+) -> None:
+    """The entity follows its sensors."""
+    hass.states.async_set("sensor.temperature", "23.5", {"unit_of_measurement": "°C"})
+    hass.states.async_set("sensor.humidity", "48")
+    await add_climate(
+        hass,
+        hub,
+        climate_subentry(
+            temperature_sensor="sensor.temperature",
+            humidity_sensor="sensor.humidity",
+        ),
+    )
+
+    state = hass.states.get(ENTITY)
+    assert state.attributes["current_temperature"] == 23.5
+    assert state.attributes["current_humidity"] == 48
+
+    hass.states.async_set("sensor.temperature", "25", {"unit_of_measurement": "°C"})
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ENTITY).attributes["current_temperature"] == 25
+
+
+async def test_converts_the_temperature_of_the_sensor(
+    hass: HomeAssistant, hub: MockConfigEntry, emitter: str
+) -> None:
+    """The entity works in Celsius, whatever the sensor uses."""
+    hass.states.async_set("sensor.temperature", "77", {"unit_of_measurement": "°F"})
+
+    await add_climate(
+        hass, hub, climate_subentry(temperature_sensor="sensor.temperature")
+    )
+
+    assert hass.states.get(ENTITY).attributes["current_temperature"] == 25
+
+
+@pytest.mark.parametrize("value", ["unavailable", "unknown"])
+async def test_keeps_working_without_the_value_of_a_sensor(
+    hass: HomeAssistant,
+    hub: MockConfigEntry,
+    emitter: str,
+    send_calls: list[ServiceCall],
+    value: str,
+) -> None:
+    """A sensor only informs: without it the entity still sends."""
+    hass.states.async_set("sensor.temperature", "23")
+    await add_climate(
+        hass, hub, climate_subentry(temperature_sensor="sensor.temperature")
+    )
+
+    hass.states.async_set("sensor.temperature", value)
+    await hass.async_block_till_done()
+    await set_mode(hass, "cool")
+
+    state = hass.states.get(ENTITY)
+    assert state.state == "cool"
+    assert state.attributes["current_temperature"] is None
+    assert len(send_calls) == 1
+
+
+async def test_sensor_that_does_not_exist(
+    hass: HomeAssistant, hub: MockConfigEntry, emitter: str
+) -> None:
+    """A sensor that was removed shows no value."""
+    await add_climate(hass, hub, climate_subentry(humidity_sensor="sensor.gone"))
+
+    state = hass.states.get(ENTITY)
+    assert state.state == "off"
+    assert state.attributes.get("current_humidity") is None
+
+
+async def test_change_of_emitter_applies_without_restarting(
+    hass: HomeAssistant,
+    hub: MockConfigEntry,
+    living,
+    other_emitter: str,
+    send_calls: list[ServiceCall],
+) -> None:
+    """The next command goes out through the new emitter."""
+    hass.config_entries.async_update_subentry(
+        hub, living, data={**living.data, "emitter_entity_id": other_emitter}
+    )
+    await hass.async_block_till_done()
+    await set_mode(hass, "cool")
+
+    assert send_calls[0].data["entity_id"] == other_emitter
+
+
+async def test_change_of_code_applies_without_restarting(
+    hass: HomeAssistant, hub: MockConfigEntry, living
+) -> None:
+    """The entity offers what the new code has, under the same identifier."""
+    hass.config_entries.async_update_subentry(
+        hub, living, data={**living.data, "code": CODE_WITH_ON}
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ENTITY).attributes["hvac_modes"] == [
+        "off",
+        "heat",
+        "fan_only",
+        "auto",
+    ]
+
+
+async def test_change_of_name_keeps_the_entity_id(
+    hass: HomeAssistant, hub: MockConfigEntry, living
+) -> None:
+    """The visible name changes and the identifier does not."""
+    hass.config_entries.async_update_subentry(hub, living, title="Bedroom")
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ENTITY).attributes["friendly_name"] == "Bedroom"

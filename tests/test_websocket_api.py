@@ -5,7 +5,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.better_smartir.const import DOMAIN
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .conftest import CODE, EMITTER, add_climate, climate_subentry
 
@@ -160,6 +160,8 @@ async def test_send_with_emitter_off_is_not_sent(
         ("test/send", STATE_REQUEST),
         ("climates/list", {}),
         ("climates/create", {"name": "A", "emitter_entity_id": EMITTER, "code": CODE}),
+        ("climates/update", {"climate_id": "a", "name": "A"}),
+        ("climates/delete", {"climate_id": "a"}),
     ],
 )
 async def test_commands_require_admin(
@@ -265,3 +267,153 @@ async def test_list_shows_existing_climates(
     response = await call(client, "climates/list")
 
     assert response["result"]["climates"][0]["climate_id"] == subentry.subentry_id
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        (
+            {"emitter_entity_id": "remote.bedroom"},
+            {"emitter_entity_id": "remote.bedroom"},
+        ),
+        ({"code": 1089}, {"code": 1089}),
+        ({"temperature_sensor": "sensor.a"}, {"temperature_sensor": "sensor.a"}),
+        ({"humidity_sensor": "sensor.b"}, {"humidity_sensor": "sensor.b"}),
+        ({"name": " Bedroom "}, {"name": "Bedroom"}),
+    ],
+)
+async def test_update_changes_a_field_and_keeps_the_rest(
+    hass: HomeAssistant,
+    client,
+    hub: MockConfigEntry,
+    emitter: str,
+    other_emitter: str,
+    entity_registry: er.EntityRegistry,
+    changes: dict,
+    expected: dict,
+) -> None:
+    """Automations keep working because the entity keeps its identity."""
+    subentry = await add_climate(hass, hub)
+    registry_id = entity_registry.async_get("climate.living").id
+    response = await call(client, "climates/list")
+    before = response["result"]["climates"][0]
+
+    response = await call(
+        client, "climates/update", climate_id=subentry.subentry_id, **changes
+    )
+    await hass.async_block_till_done()
+
+    assert response["result"] == {"climate_id": subentry.subentry_id}
+    response = await call(client, "climates/list")
+    after = response["result"]["climates"][0]
+    assert {**after, "manufacturer": None} == {
+        **before,
+        **expected,
+        "manufacturer": None,
+    }
+    assert entity_registry.async_get("climate.living").id == registry_id
+    assert hass.states.get("climate.living") is not None
+
+
+async def test_update_with_null_removes_the_sensor(
+    hass: HomeAssistant, client, hub: MockConfigEntry, emitter: str
+) -> None:
+    """Only the sensor that comes as null is removed."""
+    subentry = await add_climate(
+        hass,
+        hub,
+        climate_subentry(temperature_sensor="sensor.a", humidity_sensor="sensor.b"),
+    )
+
+    await call(
+        client,
+        "climates/update",
+        climate_id=subentry.subentry_id,
+        temperature_sensor=None,
+    )
+
+    data = hub.subentries[subentry.subentry_id].data
+    assert "temperature_sensor" not in data
+    assert data["humidity_sensor"] == "sensor.b"
+
+
+async def test_update_only_validates_what_it_receives(
+    hass: HomeAssistant, client, hub: MockConfigEntry, emitter: str
+) -> None:
+    """An emitter that is gone must not block renaming the climate."""
+    subentry = await add_climate(hass, hub, climate_subentry(emitter="remote.gone"))
+
+    response = await call(
+        client, "climates/update", climate_id=subentry.subentry_id, name="Bedroom"
+    )
+
+    assert "result" in response
+
+
+@pytest.mark.parametrize(
+    ("changes", "error"),
+    [
+        ({"name": "   "}, "invalid_name"),
+        ({"emitter_entity_id": "remote.unknown"}, "emitter_not_found"),
+        ({"code": 999999}, "code_not_found"),
+        ({"temperature_sensor": "light.living"}, "invalid_sensor"),
+        ({"humidity_sensor": "invalid"}, "invalid_sensor"),
+    ],
+)
+async def test_update_errors(
+    hass: HomeAssistant,
+    client,
+    hub: MockConfigEntry,
+    emitter: str,
+    changes: dict,
+    error: str,
+) -> None:
+    """Invalid changes leave the climate as it was."""
+    subentry = await add_climate(hass, hub)
+    data = dict(subentry.data)
+
+    response = await call(
+        client, "climates/update", climate_id=subentry.subentry_id, **changes
+    )
+
+    assert response["error"]["code"] == error
+    assert hub.subentries[subentry.subentry_id].data == data
+    assert hub.subentries[subentry.subentry_id].title == "Living"
+
+
+async def test_update_of_unknown_climate(client) -> None:
+    """A climate that no longer exists is an error."""
+    response = await call(client, "climates/update", climate_id="a", name="A")
+
+    assert response["error"]["code"] == "climate_not_found"
+
+
+async def test_delete_removes_only_that_climate(
+    hass: HomeAssistant,
+    client,
+    hub: MockConfigEntry,
+    emitter: str,
+    entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Its entity and device disappear, and the others keep working."""
+    living = await add_climate(hass, hub)
+    bedroom = await add_climate(hass, hub, climate_subentry("Bedroom"))
+
+    response = await call(client, "climates/delete", climate_id=living.subentry_id)
+    await hass.async_block_till_done()
+
+    assert response["result"] == {}
+    assert list(hub.subentries) == [bedroom.subentry_id]
+    assert hass.states.get("climate.living") is None
+    assert entity_registry.async_get("climate.living") is None
+    devices = dr.async_entries_for_config_entry(device_registry, hub.entry_id)
+    assert [device.name for device in devices] == ["Bedroom"]
+    assert hass.states.get("climate.bedroom").state == "off"
+
+
+async def test_delete_of_unknown_climate(client) -> None:
+    """A climate that no longer exists is an error."""
+    response = await call(client, "climates/delete", climate_id="a")
+
+    assert response["error"]["code"] == "climate_not_found"

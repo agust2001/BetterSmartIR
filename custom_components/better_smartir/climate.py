@@ -15,6 +15,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import (
     ATTR_TEMPERATURE,
+    ATTR_UNIT_OF_MEASUREMENT,
     STATE_UNAVAILABLE,
     UnitOfTemperature,
 )
@@ -24,6 +25,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util.unit_conversion import TemperatureConverter
 
 from . import emitter
 from .catalog import CodeData, async_get_code
@@ -36,7 +38,14 @@ from .commands import (
     available_combinations,
     command_sequence,
 )
-from .const import CONF_CODE, CONF_EMITTER, DOMAIN, SUBENTRY_TYPE_CLIMATE
+from .const import (
+    CONF_CODE,
+    CONF_EMITTER,
+    CONF_HUMIDITY_SENSOR,
+    CONF_TEMPERATURE_SENSOR,
+    DOMAIN,
+    SUBENTRY_TYPE_CLIMATE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +92,8 @@ class BetterSmartIRClimate(ClimateEntity, RestoreEntity):
         """Set up the entity from its code."""
         self._code = code
         self._emitter = subentry.data[CONF_EMITTER]
+        self._temperature_sensor = subentry.data.get(CONF_TEMPERATURE_SENSOR)
+        self._humidity_sensor = subentry.data.get(CONF_HUMIDITY_SENSOR)
         self._lock = asyncio.Lock()
         self._available_combinations = available_combinations(code)
 
@@ -136,13 +147,15 @@ class BetterSmartIRClimate(ClimateEntity, RestoreEntity):
         self._last_on_mode = next(iter(self._attr_hvac_modes[1:]), None)
 
     async def async_added_to_hass(self) -> None:
-        """Restore the last state and follow the emitter."""
+        """Restore the last state and follow the emitter and the sensors."""
         await super().async_added_to_hass()
         if (last_state := await self.async_get_last_state()) is not None:
             self._restore(last_state.state, last_state.attributes)
+        followed = [self._emitter]
+        followed += filter(None, (self._temperature_sensor, self._humidity_sensor))
         self.async_on_remove(
             async_track_state_change_event(
-                self.hass, self._emitter, self._async_emitter_changed
+                self.hass, followed, self._async_followed_changed
             )
         )
 
@@ -164,9 +177,34 @@ class BetterSmartIRClimate(ClimateEntity, RestoreEntity):
             self._last_on_mode = attributes[ATTR_LAST_ON_MODE]
 
     @callback
-    def _async_emitter_changed(self, event: Event[EventStateChangedData]) -> None:
-        """Update the availability."""
+    def _async_followed_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Update the availability and the values of the sensors."""
         self.async_write_ha_state()
+
+    def _sensor_value(self, entity_id: str | None) -> tuple[float, str | None] | None:
+        """Return the value and the unit of a sensor, if it has a value."""
+        if entity_id is None or (state := self.hass.states.get(entity_id)) is None:
+            return None
+        try:
+            return float(state.state), state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+        except ValueError:
+            return None
+
+    @property
+    def current_temperature(self) -> float | None:
+        """Return the temperature of the sensor, in the unit of the entity."""
+        if (reading := self._sensor_value(self._temperature_sensor)) is None:
+            return None
+        value, unit = reading
+        if unit not in TemperatureConverter.VALID_UNITS:
+            return value
+        return TemperatureConverter.convert(value, unit, self._attr_temperature_unit)
+
+    @property
+    def current_humidity(self) -> float | None:
+        """Return the humidity of the sensor."""
+        reading = self._sensor_value(self._humidity_sensor)
+        return reading[0] if reading else None
 
     @property
     def available(self) -> bool:

@@ -40,6 +40,16 @@ def emitter(hass: HomeAssistant, entity_registry: er.EntityRegistry) -> str:
 
 
 @pytest.fixture
+def other_emitter(hass: HomeAssistant, entity_registry: er.EntityRegistry) -> str:
+    """Register a second Broadlink remote."""
+    entity_registry.async_get_or_create(
+        "remote", "broadlink", "bedroom", suggested_object_id="bedroom"
+    )
+    hass.states.async_set("remote.bedroom", "on")
+    return "remote.bedroom"
+
+
+@pytest.fixture
 def send_calls(hass: HomeAssistant) -> list:
     """Capture the calls to remote.send_command."""
     return async_mock_service(hass, "remote", "send_command")
@@ -56,11 +66,11 @@ async def hub(hass: HomeAssistant) -> MockConfigEntry:
 
 
 def climate_subentry(
-    name: str = "Living", code: int = CODE, emitter: str = EMITTER
+    name: str = "Living", code: int = CODE, emitter: str = EMITTER, **sensors: str
 ) -> ConfigSubentry:
     """Build a climate subentry."""
     return ConfigSubentry(
-        data=MappingProxyType({CONF_EMITTER: emitter, CONF_CODE: code}),
+        data=MappingProxyType({CONF_EMITTER: emitter, CONF_CODE: code, **sensors}),
         subentry_type=SUBENTRY_TYPE_CLIMATE,
         title=name,
         unique_id=None,
