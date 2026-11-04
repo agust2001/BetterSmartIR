@@ -2,13 +2,17 @@
 // external libraries, so it also works without internet.
 
 import { translator } from "./i18n.js";
-import { DEFAULT_MODE_ICON, MODE_ICONS, icon } from "./icons.js";
+import { icon } from "./icons.js";
 import * as session from "./session.js";
 import { STYLES } from "./styles.js";
+import { TEST_ENTITY, applyAction, climateOptions, virtualState } from "./virtual_climate.js";
 
 const API_PREFIX = "better_smartir";
 // The entity appears after the reload that follows saving a climate.
 const REFRESH_AFTER_SAVE_MS = 1500;
+// The card loads on demand, so a slow connection needs some margin.
+const CONTROL_CHECK_MS = 5000;
+const CONTROL_CONTEXTS = ["states", "hassApi"];
 
 function escapeHtml(value) {
   return String(value ?? "").replace(
@@ -33,7 +37,9 @@ class BetterSmartIRPanel extends HTMLElement {
     this._focusKey = null;
     this._focusVisible = false;
     this._focusPending = false;
-    this._sendKey = null;
+    this._control = null;
+    this._controlFailed = false;
+    this._mountId = 0;
     this._view = "list";
     this._climates = [];
     this._emitters = [];
@@ -55,6 +61,9 @@ class BetterSmartIRPanel extends HTMLElement {
   set hass(hass) {
     const firstTime = !this._hass;
     this._hass = hass;
+    if (this._control) {
+      this._onHassChanged();
+    }
     if (firstTime) {
       this._t = translator(hass.language);
       this._loadClimates();
@@ -136,6 +145,7 @@ class BetterSmartIRPanel extends HTMLElement {
 
   _startTest() {
     return this._run(async () => {
+      this._controlFailed = false;
       const { codes } = await this._call("codes", { brand: this._brand });
       this._session = session.createSession({
         emitter: this._emitter,
@@ -157,6 +167,8 @@ class BetterSmartIRPanel extends HTMLElement {
   }
 
   _changeCode(move) {
+    this._removeControl();
+    this._controlFailed = false;
     this._session = move(this._session);
     if (this._session.exhausted) {
       this._render();
@@ -165,12 +177,181 @@ class BetterSmartIRPanel extends HTMLElement {
     return this._run(() => this._loadCode());
   }
 
-  async _send(category) {
-    if (this._session.sendStatus === "sending") {
+  _units() {
+    return {
+      unit: this._hass.config?.unit_system?.temperature,
+      precision: this._session.details.precision,
+    };
+  }
+
+  _sensorValue(entityId) {
+    const value = Number.parseFloat(this._hass.states[entityId]?.state);
+    return Number.isNaN(value) ? null : value;
+  }
+
+  // Only a climate that already exists has sensors.
+  _sensorValues() {
+    return {
+      currentTemperature: this._sensorValue(this._editing && this._sensors.temperature_sensor),
+      currentHumidity: this._sensorValue(this._editing && this._sensors.humidity_sensor),
+    };
+  }
+
+  _virtualState() {
+    const { details, climate } = this._session;
+    return virtualState(details, climate, { ...this._units(), ...this._sensorValues() });
+  }
+
+  // The state keeps its identity unless it changes, or the card would redraw every time.
+  _onHassChanged() {
+    const { attributes } = this._control.state;
+    const { currentTemperature, currentHumidity } = this._sensorValues();
+    if (
+      attributes.current_temperature !== currentTemperature ||
+      attributes.current_humidity !== currentHumidity
+    ) {
+      this._control.state = this._virtualState();
+    }
+    this._control.card.hass = this._controlHass();
+    this._notifyControl();
+  }
+
+  _controlStates() {
+    return { ...this._hass.states, [TEST_ENTITY]: this._control.state };
+  }
+
+  _controlHass() {
+    return {
+      ...this._hass,
+      states: this._controlStates(),
+      callService: (...args) => this._controlService(...args),
+    };
+  }
+
+  _notifyControl() {
+    const states = this._controlStates();
+    this._control.subscribers.forEach((unsubscribe, subscriber) =>
+      subscriber(states, unsubscribe),
+    );
+  }
+
+  _refreshControl() {
+    if (this._control) {
+      this._control.state = this._virtualState();
+      this._control.card.hass = this._controlHass();
+      this._notifyControl();
+    }
+  }
+
+  // The card reads its entity and calls services through these two contexts. Any other
+  // context goes on to Home Assistant, so the card keeps the real theme and language.
+  _onContextRequest(event) {
+    this._control.contexts.add(event.context);
+    if (event.context === "states") {
+      event.stopImmediatePropagation();
+      // The consumer drops its subscription if it gets a different unsubscribe.
+      const { callback } = event;
+      const { subscribers } = this._control;
+      const unsubscribe = subscribers.get(callback) ?? (() => subscribers.delete(callback));
+      if (event.subscribe) {
+        subscribers.set(callback, unsubscribe);
+      }
+      callback(this._controlStates(), unsubscribe);
+    } else if (event.context === "hassApi") {
+      event.stopImmediatePropagation();
+      event.callback(this._controlHass(), () => {});
+    }
+  }
+
+  _controlConfig() {
+    const { fans, swings } = climateOptions(this._session.details);
+    const features = [{ type: "climate-hvac-modes", style: "dropdown" }];
+    if (fans.length) {
+      features.push({ type: "climate-fan-modes", style: "dropdown" });
+    }
+    if (swings.length) {
+      features.push({ type: "climate-swing-modes", style: "dropdown" });
+    }
+    return { type: "thermostat", entity: TEST_ENTITY, features };
+  }
+
+  async _mountControl(slot) {
+    this._mountId += 1;
+    const mountId = this._mountId;
+    let helpers;
+    try {
+      helpers = await window.loadCardHelpers();
+    } catch {
+      this._controlUnavailable();
       return;
     }
-    const request = session.sendRequest(this._session, category);
-    this._session = session.sendStarted(this._session, category);
+    if (mountId !== this._mountId || !slot.isConnected) {
+      return;
+    }
+    const box = document.createElement("div");
+    const contexts = new Set();
+    this._control = { box, contexts, state: this._virtualState(), subscribers: new Map() };
+    box.addEventListener("context-request", (event) => this._onContextRequest(event));
+    box.addEventListener("hass-more-info", (event) => event.stopPropagation());
+    this._control.card = helpers.createCardElement(this._controlConfig());
+    this._control.card.hass = this._controlHass();
+    box.append(this._control.card);
+    slot.append(box);
+    setTimeout(() => {
+      const connected = CONTROL_CONTEXTS.every((context) => contexts.has(context));
+      if (mountId === this._mountId && !connected) {
+        this._controlUnavailable();
+      }
+    }, CONTROL_CHECK_MS);
+  }
+
+  // A card that is not connected to the test would look fine and do nothing.
+  _controlUnavailable() {
+    this._removeControl();
+    this._controlFailed = true;
+    this._render();
+  }
+
+  _removeControl() {
+    this._mountId += 1;
+    this._control?.box.remove();
+    this._control = null;
+  }
+
+  _syncControl() {
+    const slot = this._content.querySelector("#control-slot");
+    if (slot && this._session?.climate && !this._controlFailed) {
+      this._mountControl(slot);
+    } else {
+      this._removeControl();
+    }
+  }
+
+  async _controlService(domain, service, data) {
+    const accepted = domain === "climate" && data?.entity_id === TEST_ENTITY;
+    if (accepted && this._session?.climate) {
+      await this._applyControlAction(service, data);
+    }
+    return { context: { id: "better_smartir_test" } };
+  }
+
+  async _applyControlAction(service, data) {
+    const result = applyAction(this._session.climate, service, data, this._units());
+    if (!result || this._isSending()) {
+      this._refreshControl();
+      return;
+    }
+    if (result.action) {
+      await this._send(result);
+    } else {
+      this._session = session.storeClimate(this._session, result.climate);
+    }
+    this._refreshControl();
+  }
+
+  async _send({ action, category, climate }) {
+    const request = session.sendRequest(this._session, action, climate);
+    this._session = session.sendStarted(this._session, category, climate);
     this._live.textContent = this._t("sending");
     this._render();
     try {
@@ -223,6 +404,7 @@ class BetterSmartIRPanel extends HTMLElement {
   // Leaving a test of an existing climate goes back to it, without changing it.
   _cancel() {
     this._error = null;
+    this._removeControl();
     if (this._editing && this._view !== "edit") {
       this._session = null;
       this._view = "edit";
@@ -241,8 +423,7 @@ class BetterSmartIRPanel extends HTMLElement {
     if (!button || button.disabled) {
       return;
     }
-    const { action, category, climate, focusKey, value } = button.dataset;
-    this._sendKey = focusKey;
+    const { action, climate, value } = button.dataset;
     switch (action) {
       case "menu":
         this.dispatchEvent(
@@ -272,17 +453,6 @@ class BetterSmartIRPanel extends HTMLElement {
         break;
       case "cancel":
         this._cancel();
-        break;
-      case "send":
-        this._send(category);
-        break;
-      case "choose":
-        this._session = session.select(this._session, category, value);
-        this._send(category);
-        break;
-      case "temperature":
-        this._session = session.stepTemperature(this._session, Number(value));
-        this._send("temperature");
         break;
       case "result":
         this._session = session.markResult(this._session, value === "yes");
@@ -332,6 +502,11 @@ class BetterSmartIRPanel extends HTMLElement {
 
   _render() {
     this._rememberFocus();
+    if (this._view === "test" && this._control?.box.isConnected) {
+      this._renderTestParts();
+      this._restoreFocus();
+      return;
+    }
     const views = {
       list: () => this._renderList(),
       edit: () => this._renderEdit(),
@@ -353,6 +528,7 @@ class BetterSmartIRPanel extends HTMLElement {
       <main class="${this._view === "test" ? "wide" : ""}">${error}${views[this._view]()}</main>
     `;
     this._restoreFocus();
+    this._syncControl();
   }
 
   _rememberFocus() {
@@ -386,33 +562,16 @@ class BetterSmartIRPanel extends HTMLElement {
     }
   }
 
-  // variant: "primary", "danger", "option" or "round". An option also tells whether
-  // it is selected. A button without visible text needs a name.
-  _button(
-    label,
-    attributes,
-    { variant = "", modeClass = "", iconName, name, selected, disabled = false } = {},
-  ) {
+  // variant: "primary" or "danger".
+  _button(label, attributes, { variant = "", iconName, disabled = false } = {}) {
     const data = Object.entries(attributes)
       .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
       .join(" ");
     const focusKey = Object.values(attributes).join(":");
-    const sending = this._session?.sendStatus === "sending" && focusKey === this._sendKey;
-    const pressed = selected === undefined ? "" : `aria-pressed="${selected}"`;
-    const accessibleName = name ? `aria-label="${escapeHtml(name)}"` : "";
     return `
-      <button class="${variant} ${modeClass} ${sending ? "sending" : ""}" ${data} data-focus-key="${escapeHtml(focusKey)}"
-        ${pressed} ${accessibleName} ${disabled ? "disabled" : ""}>
-        ${sending ? icon("loading") : iconName ? icon(iconName) : ""}${escapeHtml(label)}${selected ? icon("check") : ""}
+      <button class="${variant}" ${data} data-focus-key="${escapeHtml(focusKey)}" ${disabled ? "disabled" : ""}>
+        ${iconName ? icon(iconName) : ""}${escapeHtml(label)}
       </button>`;
-  }
-
-  _modeClass(mode) {
-    return `mode-${MODE_ICONS[mode] ? mode : "other"}`;
-  }
-
-  _modeIcon(mode) {
-    return MODE_ICONS[mode] ?? DEFAULT_MODE_ICON;
   }
 
   _renderList() {
@@ -575,28 +734,6 @@ class BetterSmartIRPanel extends HTMLElement {
       </section>`;
   }
 
-  _renderChoices(title, category, values, selected, optionsOf) {
-    if (!values.length) {
-      return "";
-    }
-    const buttons = values
-      .map((value) => {
-        const { label = value, ...options } = optionsOf?.(value) ?? {};
-        return this._button(
-          label,
-          { action: "choose", category, value },
-          {
-            variant: "option",
-            selected: value === selected,
-            disabled: this._isSending(),
-            ...options,
-          },
-        );
-      })
-      .join("");
-    return `<div class="group"><h3>${escapeHtml(title)}</h3><div class="row">${buttons}</div></div>`;
-  }
-
   _isSending() {
     return this._session.sendStatus === "sending";
   }
@@ -623,48 +760,20 @@ class BetterSmartIRPanel extends HTMLElement {
         </section>`;
     }
     if (sendStatus === "sending") {
-      return `<section class="status">${line("loading", t("sending"))}</section>`;
+      return `<section class="status status-sending">${line("loading", t("sending"))}</section>`;
     }
     return `<section class="status status-idle">${line("airConditioner", t("status_idle"))}</section>`;
   }
 
-  _renderHero(selection, temperatures, disabled) {
+  _renderTestSummary() {
     const t = this._t;
-    const { mode, temperature } = selection;
+    const { details, position, codes } = this._session;
+    const title = t("code_position", { position: position + 1, total: codes.length });
+    const progress = ((position + 1) / codes.length) * 100;
     return `
-      <section class="hero ${this._modeClass(mode)} ${disabled ? "sending" : ""}">
-        <div class="hero-mode">${icon(this._modeIcon(mode))}<span>${escapeHtml(t(`mode_${mode}`))}</span></div>
-        <div class="hero-controls">
-          ${this._button("", { action: "temperature", value: "-1" }, { variant: "round", iconName: "minus", name: t("temperature_down"), disabled: disabled || temperature === temperatures[0] })}
-          <span class="temperature">${escapeHtml(temperature)}°</span>
-          ${this._button("", { action: "temperature", value: "1" }, { variant: "round", iconName: "plus", name: t("temperature_up"), disabled: disabled || temperature === temperatures.at(-1) })}
-        </div>
-      </section>`;
-  }
-
-  _renderTest() {
-    const t = this._t;
-    const current = this._session;
-    if (current.exhausted) {
-      return this._renderExhausted();
-    }
-    if (!current.details) {
-      return "";
-    }
-    const { modes, fans, swings, temperatures } = session.options(current);
-    const { details, selection } = current;
-    const disabled = this._isSending();
-    const primary = session.primaryAction(current);
-    const variantOf = (action) => (primary === action ? "primary" : "");
-    const position = t("code_position", {
-      position: current.position + 1,
-      total: current.codes.length,
-    });
-    const progress = ((current.position + 1) / current.codes.length) * 100;
-    const summary = `
       <section>
         <div>
-          <h2>${escapeHtml(position)}</h2>
+          <h2>${escapeHtml(title)}</h2>
           <p class="muted">
             ${escapeHtml(details.manufacturer)} · ${escapeHtml(t("code_label", { code: details.code }))}
             · ${escapeHtml(details.models.join(", "))}
@@ -672,42 +781,57 @@ class BetterSmartIRPanel extends HTMLElement {
         </div>
         <div class="progress"><div style="width: ${progress}%"></div></div>
       </section>`;
-    const left = selection
-      ? `${this._renderHero(selection, temperatures, disabled)}${this._renderStatus(primary)}`
-      : `<section><p>${escapeHtml(t("no_commands"))}</p></section>`;
-    const controls = selection
-      ? `
-        <section>
-          <div class="group">
-            <h3>${escapeHtml(t("power"))}</h3>
-            <div class="row">
-              ${this._button(t("turn_on"), { action: "send", category: "on" }, { variant: variantOf("on"), iconName: "power", disabled })}
-              ${this._button(t("turn_off"), { action: "send", category: "off" }, { iconName: "powerOff", disabled })}
-            </div>
-          </div>
-          ${this._renderChoices(t("mode"), "mode", modes, selection.mode, (mode) => ({
-            label: t(`mode_${mode}`),
-            iconName: this._modeIcon(mode),
-            modeClass: this._modeClass(mode),
-          }))}
-          ${this._renderChoices(t("fan"), "fan", fans, selection.fan)}
-          ${this._renderChoices(t("swing"), "swing", swings, selection.swing)}
-        </section>`
-      : "";
+  }
+
+  _renderTestStatus(primary) {
+    if (this._controlFailed) {
+      return `<section role="alert"><p>${escapeHtml(this._t("control_unavailable"))}</p></section>`;
+    }
+    return this._session.climate
+      ? this._renderStatus(primary)
+      : `<section><p>${escapeHtml(this._t("no_commands"))}</p></section>`;
+  }
+
+  _renderTestFooter(primary) {
+    const t = this._t;
+    const { climate, position } = this._session;
+    const disabled = this._isSending();
+    const variantOf = (action) => (primary === action ? "primary" : "");
+    return `
+      <section>
+        <div class="row spread">
+          ${this._button(t("previous"), { action: "previous" }, { iconName: "chevronLeft", disabled: disabled || position === 0 })}
+          ${this._button(t("next"), { action: "next" }, { variant: variantOf("next"), iconName: "chevronRight", disabled })}
+        </div>
+        <div class="row spread">
+          ${this._button(t("save"), { action: "review" }, { variant: variantOf("save"), iconName: "contentSave", disabled: disabled || !climate || this._controlFailed })}
+          ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
+        </div>
+      </section>`;
+  }
+
+  // The control stays in place: drawing it again would interrupt the dial.
+  _renderTestParts() {
+    const primary = session.primaryAction(this._session);
+    this._content.querySelector("#test-status").innerHTML = this._renderTestStatus(primary);
+    this._content.querySelector("#test-footer").innerHTML = this._renderTestFooter(primary);
+  }
+
+  _renderTest() {
+    const current = this._session;
+    if (current.exhausted) {
+      return this._renderExhausted();
+    }
+    if (!current.details) {
+      return "";
+    }
+    const primary = session.primaryAction(current);
     return `
       <div class="test-layout">
-        <div class="test-column">${summary}${left}</div>
-        <div class="test-column">${controls}</div>
-        <section class="test-footer">
-          <div class="row spread">
-            ${this._button(t("previous"), { action: "previous" }, { iconName: "chevronLeft", disabled: disabled || current.position === 0 })}
-            ${this._button(t("next"), { action: "next" }, { variant: variantOf("next"), iconName: "chevronRight", disabled })}
-          </div>
-          <div class="row spread">
-            ${this._button(t("save"), { action: "review" }, { variant: variantOf("save"), iconName: "contentSave", disabled: disabled || !selection })}
-            ${this._button(t("cancel"), { action: "cancel" }, { iconName: "close" })}
-          </div>
-        </section>
+        <div class="test-summary">${this._renderTestSummary()}</div>
+        <div id="control-slot" class="test-control"></div>
+        <div id="test-status" class="test-status">${this._renderTestStatus(primary)}</div>
+        <div id="test-footer" class="test-footer">${this._renderTestFooter(primary)}</div>
       </div>`;
   }
 

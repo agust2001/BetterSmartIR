@@ -6,24 +6,25 @@ import {
   currentCode,
   markResult,
   next,
-  options,
   pendingSummary,
   previous,
   primaryAction,
   restart,
   saveRequest,
-  select,
   sendFailed,
   sendRequest,
   sendStarted,
   sendSucceeded,
-  stepTemperature,
+  storeClimate,
   updateRequest,
   withDetails,
 } from "../../custom_components/better_smartir/frontend/session.js";
 
 const DETAILS = {
   code: 10,
+  min_temperature: 16,
+  modes: ["cool", "heat"],
+  fan_modes: ["low", "high"],
   swing_modes: [],
   available: {
     cool: { low: ["16", "17", "18"], high: ["20"] },
@@ -33,8 +34,20 @@ const DETAILS = {
 
 const SWING_DETAILS = {
   code: 11,
+  min_temperature: 16,
+  modes: ["cool"],
+  fan_modes: ["low"],
   swing_modes: ["up", "down"],
   available: { cool: { low: { up: ["16"], down: ["17", "18"] } } },
+};
+
+const NO_COMMANDS = {
+  code: 12,
+  min_temperature: 16,
+  modes: [],
+  fan_modes: [],
+  swing_modes: [],
+  available: {},
 };
 
 function newSession(details = DETAILS) {
@@ -45,19 +58,6 @@ function newSession(details = DETAILS) {
   });
   return withDetails(session, details);
 }
-
-test("starts at the first code with the first available combination", () => {
-  const session = newSession();
-
-  assert.equal(currentCode(session), 10);
-  assert.equal(session.position, 0);
-  assert.deepEqual(session.selection, {
-    mode: "cool",
-    fan: "low",
-    swing: null,
-    temperature: "16",
-  });
-});
 
 test("next and previous move through the codes and clear the results", () => {
   let session = sendSucceeded(sendStarted(newSession(), "on"));
@@ -89,83 +89,6 @@ test("going past the last code exhausts the session and it can restart", () => {
   session = restart(session);
   assert.equal(session.exhausted, false);
   assert.equal(currentCode(session), 10);
-});
-
-test("only offers what the code has for the current selection", () => {
-  const session = select(newSession(), "mode", "heat");
-
-  assert.deepEqual(options(session), {
-    modes: ["cool", "heat"],
-    fans: ["low"],
-    swings: [],
-    temperatures: ["24"],
-  });
-});
-
-test("changing a value moves the others to something available", () => {
-  const session = select(newSession(), "fan", "high");
-
-  assert.equal(session.selection.temperature, "20");
-});
-
-test("keeps the closest temperature when the fan changes", () => {
-  let session = select(newSession(), "temperature", "18");
-  session = select(session, "mode", "heat");
-
-  assert.deepEqual(session.selection, {
-    mode: "heat",
-    fan: "low",
-    swing: null,
-    temperature: "24",
-  });
-});
-
-test("swing is part of the selection", () => {
-  let session = newSession(SWING_DETAILS);
-  assert.equal(session.selection.swing, "up");
-  assert.deepEqual(options(session).swings, ["up", "down"]);
-
-  session = select(session, "swing", "down");
-
-  assert.equal(session.selection.temperature, "17");
-  assert.deepEqual(options(session).temperatures, ["17", "18"]);
-});
-
-test("a code without usable commands has no selection", () => {
-  const session = newSession({ code: 12, swing_modes: [], available: {} });
-
-  assert.equal(session.selection, null);
-  assert.deepEqual(options(session).modes, []);
-});
-
-test("the temperature moves through the available values and stops at the ends", () => {
-  let session = stepTemperature(newSession(), 1);
-  assert.equal(session.selection.temperature, "17");
-
-  session = stepTemperature(stepTemperature(session, 1), 1);
-  assert.equal(session.selection.temperature, "18");
-
-  assert.equal(stepTemperature(newSession(), -1).selection.temperature, "16");
-});
-
-test("requests carry the whole combination", () => {
-  const session = newSession();
-
-  assert.deepEqual(sendRequest(session, "temperature"), {
-    emitter_entity_id: "remote.living",
-    code: 10,
-    action: "state",
-    mode: "cool",
-    fan: "low",
-    swing: null,
-    temperature: 16,
-  });
-  assert.equal(sendRequest(session, "on").action, "on");
-  assert.deepEqual(sendRequest(session, "off"), {
-    emitter_entity_id: "remote.living",
-    code: 10,
-    action: "off",
-  });
 });
 
 test("a failure keeps the position and does not count as a result", () => {
@@ -286,8 +209,8 @@ function answered(session, responded) {
   return markResult(sendSucceeded(sendStarted(session, "on")), responded);
 }
 
-test("before sending anything, the main action is to turn on", () => {
-  assert.equal(primaryAction(newSession()), "on");
+test("before sending anything the control is the main element", () => {
+  assert.equal(primaryAction(newSession()), null);
 });
 
 test("after sending, the main action is to confirm that it worked", () => {
@@ -303,7 +226,7 @@ test("after it did not respond, the main action is the next code", () => {
 });
 
 test("a code without usable commands leads to the next one", () => {
-  const session = newSession({ code: 12, swing_modes: [], available: {} });
+  const session = newSession(NO_COMMANDS);
 
   assert.equal(primaryAction(session), "next");
 });
@@ -313,7 +236,7 @@ test("when the codes run out, the main action is to go through them again", () =
 });
 
 test("sending does not change the main action", () => {
-  assert.equal(primaryAction(sendStarted(newSession(), "on")), "on");
+  assert.equal(primaryAction(sendStarted(newSession(), "on")), null);
   assert.equal(primaryAction(sendStarted(answered(newSession(), true), "fan")), "save");
 });
 
@@ -326,5 +249,74 @@ test("a failed send keeps the main action", () => {
 test("changing the code forgets the last answer", () => {
   const session = withDetails(next(answered(newSession(), true)), DETAILS);
 
-  assert.equal(primaryAction(session), "on");
+  assert.equal(primaryAction(session), null);
+});
+
+const COOL = {
+  hvacMode: "cool",
+  temperature: 20,
+  fan: "low",
+  swing: null,
+  lastOnMode: "cool",
+};
+
+test("each code starts with its climate turned off", () => {
+  const { climate } = newSession();
+
+  assert.deepEqual(climate, {
+    hvacMode: "off",
+    temperature: 16,
+    fan: "low",
+    swing: null,
+    lastOnMode: "cool",
+  });
+});
+
+test("a code without usable commands has no climate", () => {
+  assert.equal(newSession(NO_COMMANDS).climate, null);
+});
+
+test("changing the code forgets the climate", () => {
+  assert.equal(next(newSession()).climate, null);
+});
+
+test("requests carry the whole state", () => {
+  const session = newSession();
+
+  assert.deepEqual(sendRequest(session, "state", COOL), {
+    emitter_entity_id: "remote.living",
+    code: 10,
+    action: "state",
+    mode: "cool",
+    fan: "low",
+    swing: null,
+    temperature: 20,
+  });
+  assert.equal(sendRequest(session, "on", COOL).action, "on");
+  assert.deepEqual(sendRequest(session, "off", COOL), {
+    emitter_entity_id: "remote.living",
+    code: 10,
+    action: "off",
+  });
+});
+
+test("the new climate only counts once it was sent", () => {
+  const session = sendStarted(newSession(), "on", COOL);
+  assert.equal(session.climate.hvacMode, "off");
+
+  assert.deepEqual(sendSucceeded(session).climate, COOL);
+});
+
+test("a failed send keeps the previous climate", () => {
+  const session = sendFailed(sendStarted(newSession(), "on", COOL), "error");
+
+  assert.equal(session.climate.hvacMode, "off");
+  assert.equal(sendSucceeded(sendStarted(session, "on")).climate.hvacMode, "off");
+});
+
+test("a change that sends nothing is stored", () => {
+  const session = storeClimate(newSession(), { ...COOL, hvacMode: "off" });
+
+  assert.equal(session.climate.temperature, 20);
+  assert.equal(session.sendStatus, "idle");
 });

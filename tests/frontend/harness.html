@@ -63,6 +63,71 @@
 </div>
 <div id="host"></div>
 <script type="module">
+// Stands in for the thermostat card, which only exists inside Home Assistant. It uses
+// the same contexts and services, so this page checks the flow but not the look.
+class StubCard extends HTMLElement {
+  connectedCallback() {
+    const request = (context, callback, subscribe) =>
+      this.dispatchEvent(
+        Object.assign(new Event("context-request", { bubbles: true, composed: true }), {
+          context,
+          callback,
+          subscribe,
+        }),
+      );
+    request("hassApi", (api) => { this.api = api; }, false);
+    // Like the real consumers: a different unsubscribe ends the previous subscription.
+    request(
+      "states",
+      (states, unsubscribe) => {
+        if (this.unsubscribe && this.unsubscribe !== unsubscribe) {
+          this.unsubscribe();
+        }
+        this.unsubscribe = unsubscribe;
+        this.draw(states);
+      },
+      true,
+    );
+  }
+
+  call(service, data = {}) {
+    this.api.callService("climate", service, { entity_id: this.entity, ...data });
+  }
+
+  draw(states) {
+    const { state, attributes: a } = states[this.entity];
+    const select = (name, values, value) =>
+      `<select name="${name}">${values.map((item) => `<option ${item === value ? "selected" : ""}>${item}</option>`).join("")}</select>`;
+    this.innerHTML = `
+      <div style="padding: 16px; border: 1px dashed var(--divider-color)">
+        <p>Tarjeta sustituta: ${a.friendly_name}</p>
+        <p id="stub-state">${state} · ${a.temperature}°</p>
+        <button data-delta="-1">−</button> <button data-delta="1">+</button>
+        ${select("hvac", a.hvac_modes, state)}
+        ${select("fan", a.fan_modes, a.fan_mode)}
+        ${a.swing_modes ? select("swing", a.swing_modes, a.swing_mode) : ""}
+      </div>`;
+    this.temperature = a.temperature;
+    this.querySelectorAll("button").forEach((button) => {
+      button.onclick = () =>
+        this.call("set_temperature", { temperature: this.temperature + Number(button.dataset.delta) });
+    });
+    this.querySelector("[name=hvac]").onchange = (event) =>
+      this.call("set_hvac_mode", { hvac_mode: event.target.value });
+    this.querySelector("[name=fan]").onchange = (event) =>
+      this.call("set_fan_mode", { fan_mode: event.target.value });
+    const swing = this.querySelector("[name=swing]");
+    if (swing) {
+      swing.onchange = (event) => this.call("set_swing_mode", { swing_mode: event.target.value });
+    }
+  }
+}
+customElements.define("stub-card", StubCard);
+window.loadCardHelpers = async () => ({
+  createCardElement: ({ entity }) =>
+    Object.assign(document.createElement("stub-card"), { entity }),
+});
+
 await import("/custom_components/better_smartir/frontend/better-smartir-panel.js");
 
 const temperatures = (from, to) =>

@@ -25,7 +25,8 @@ Aparecerá **BetterSmartIR** en la barra lateral. A partir de aquí, nada requie
 
 1. En el panel, elige **Agregar clima**.
 2. Selecciona el emisor y la marca, y pulsa **Empezar a probar**.
-3. Usa los botones de encender, modo, temperatura y ventilador. Cada uno envía el comando real al aire.
+3. Usa el control de clima de Home Assistant. Elige un modo para encender: cada cambio envía el comando real
+   al aire. Con el control apagado, los cambios no envían nada, igual que en un clima real.
 4. Si el aire no responde, pasa al **Siguiente código**.
 5. Cuando encuentres el código correcto, pulsa **Guardar este código** y ponle un nombre.
 
@@ -55,6 +56,9 @@ Con **Borrar** se eliminan el clima, su entidad y su dispositivo, después de pe
   puede diferir del real si usas el control remoto original.
 - Si la entidad `remote` del Broadlink está apagada, los comandos fallan con un aviso. Enciéndela para
   enviar.
+- La pantalla de prueba usa la tarjeta de termostato de Home Assistant sin crear ninguna entidad, y para eso
+  depende de partes internas de su interfaz. Si una actualización las cambia, verás un aviso en esa pantalla
+  hasta que se publique una versión compatible. Los climas ya guardados no se ven afectados.
 - La lista de sensores solo incluye los que tienen la clase `temperature` o `humidity`.
 
 ## Códigos
