@@ -150,7 +150,7 @@ tests se escriben primero y deben fallar antes de implementar.
 - [X] T047 Subir el código a `agust2001/BetterSmartIR` y comprobar que pasan los tests, `hassfest` y la validación de HACS de `.github/workflows/validate.yml`
 - [X] T048 Comprobar en una instancia real cómo se ven las subentradas en Dispositivos y servicios y, si hace falta, declarar el tipo en `custom_components/better_smartir/config_flow.py` (riesgo del plan)
 - [X] T049 Medir en una instancia real cuánto tarda la recarga y comprobar SC-002 y SC-005; registrar el resultado en `specs/001-climas-ir-prueba-grafica/research.md`
-- [ ] T050 Ejecutar todos los tests y la validación manual de `specs/001-climas-ir-prueba-grafica/quickstart.md` con un Broadlink y un aire reales
+- [X] T050 Ejecutar todos los tests y la validación manual de `specs/001-climas-ir-prueba-grafica/quickstart.md` con un Broadlink y un aire reales
 - [X] T051 Revisar el cumplimiento de `.specify/memory/constitution.md` y actualizar la tabla de `specs/001-climas-ir-prueba-grafica/plan.md`
 
 ---

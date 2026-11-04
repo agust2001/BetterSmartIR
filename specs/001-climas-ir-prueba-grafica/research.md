@@ -166,3 +166,13 @@ Medido el 2026-11-04 en Home Assistant 2026.10.3, con un clima y un Broadlink re
   hora de inicio de Home Assistant no cambió y la entidad conservó su identificador.
 - **Subentradas (T048)**: la persona que hizo la prueba no encontró problemas en Dispositivos y
   servicios, así que no se declara el tipo de subentrada en `config_flow.py`.
+- **Alta (SC-002)**: la entidad de un clima nuevo apareció 108 ms después de guardar.
+- **Validación manual (T050)**, desde el panel real:
+  - Escenario 2: con el emisor apagado, la pantalla mostró el error, no "enviado", y conservó el código.
+  - Escenario 3: al recargar la página durante un alta no quedó ningún clima nuevo.
+  - Escenario 4: salir de la prueba sin guardar conservó el código, y cambiar el nombre conservó el
+    `entity_id`. No se probó con una automatización, porque ninguna usa este clima.
+  - Escenario 5: al borrar un clima desapareció su entidad y el otro siguió disponible.
+  - Escenario 6: tras reiniciar, el clima volvió en `cool` a 24° con el ventilador `low`.
+  - Estas pruebas leen el estado de Home Assistant. Que el aire obedeciera solo lo observó la persona
+    en su prueba anterior.
